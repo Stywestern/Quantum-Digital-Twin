@@ -1,0 +1,121 @@
+{
+    "grid": "case5",
+    "solver": "dc_sa",
+    "max_time_allowed": 1800,
+    "solution": {
+        "cost_eur_per_hr": 17494.0,
+        "generator_dispatch_mw": {
+            "0": {
+                "p_mw": 36.0
+            },
+            "1": {
+                "p_mw": 215.0
+            },
+            "2": {
+                "p_mw": 519.0
+            }
+        },
+        "static_generator_dispatch_mw": {
+            "0": {
+                "p_mw": 154.0
+            }
+        },
+        "slack_dispatch_mw": {
+            "0": {
+                "p_mw": 76.0
+            }
+        },
+        "grid_state": {
+            "max_line_loading_percent": null,
+            "max_voltage_pu": null,
+            "min_voltage_pu": null,
+            "feasibility": {
+                "total_generation_mw": 1000.0,
+                "total_load_mw": 1000.0,
+                "raw_imbalance_mw": 0.0,
+                "raw_slack_dispatch_mw": 76.0,
+                "cost_raw_dispatch_eur": 17494.0,
+                "max_line_violation_mw": 0.542,
+                "tolerance_mw": 1.0,
+                "balance_ok": true,
+                "lines_ok": true,
+                "bounds_ok": true,
+                "is_feasible": true,
+                "line_flows_mw": {
+                    "0": 292.077,
+                    "1": 176.381,
+                    "2": -278.458,
+                    "3": -7.923,
+                    "4": -92.923,
+                    "5": -240.542
+                },
+                "bus_angles_rad": {
+                    "0": 0.05362,
+                    "1": -0.028454,
+                    "2": -0.027598,
+                    "3": 0.0,
+                    "4": 0.071441
+                }
+            }
+        }
+    },
+    "metadata": {
+        "status": "Success",
+        "solver_name": "neal_simulated_annealing_dc_ptdf",
+        "execution_time_seconds": {
+            "total": 75.032,
+            "formulation_cpu": 0.0041,
+            "sampling_cpu_sa": 75.027
+        },
+        "problem_complexity": {
+            "formulation": "dc_ptdf",
+            "classical_domain_input": {
+                "continuous_variables": 5,
+                "equality_constraints": 1,
+                "inequality_constraints": 4
+            },
+            "quantum_domain_qubo": {
+                "total_logical_qubits": 61,
+                "qubits_used_for_variables": 42,
+                "qubits_used_for_dispatch": 42,
+                "qubits_used_for_angles": 0,
+                "qubits_wasted_on_slack": 19,
+                "num_interactions": 1588,
+                "offset": 123512792.90854417
+            },
+            "penalties": {
+                "balance": 80.0,
+                "line": 80.0
+            }
+        },
+        "qubo_parameters": {
+            "mw_precision": 1.0,
+            "angle_precision": null,
+            "penalty_balance": null,
+            "penalty_line": null,
+            "enforce_line_limits": true,
+            "seed": 8675309
+        },
+        "algorithmic_metrics": {
+            "framework": "pure_qubo_discretization",
+            "num_iterations": 1,
+            "optimality_gap_percent": 0.0,
+            "sampler_stats": {
+                "num_reads_requested": 1000,
+                "num_sweeps_per_read": 50000,
+                "unique_states_found": 1000,
+                "energy_best": 17518.0,
+                "energy_mean": 22209.33,
+                "energy_worst": 62376.48,
+                "energy_std_dev": 3469.47
+            }
+        },
+        "hardware_metrics": {
+            "qpu_target": "classical_cpu_simulated",
+            "logical_qubits": 61,
+            "physical_qubits": 61,
+            "max_chain_length": 1,
+            "circuit_depth": 0
+        }
+    }
+}

@@ -1,0 +1,56 @@
+{
+    "grid": "case9",
+    "solver": "ac_opf",
+    "max_time_allowed": 1800,
+    "solution": {
+        "cost_eur_per_hr": 5311.912,
+        "generator_dispatch_mw": {
+            "0": {
+                "p_mw": 134.483,
+                "q_mvar": 25.002
+            },
+            "1": {
+                "p_mw": 94.327,
+                "q_mvar": -4.005
+            }
+        },
+        "slack_dispatch_mw": {
+            "0": {
+                "p_mw": 90.12,
+                "q_mvar": -6.15
+            }
+        },
+        "grid_state": {
+            "max_line_loading_percent": 51.587,
+            "max_voltage_pu": 1.061,
+            "min_voltage_pu": 0.991
+        }
+    },
+    "metadata": {
+        "status": "Success",
+        "solver_name": "pandapower_interior_point",
+        "execution_time_seconds": {
+            "total": 0.6029,
+            "qpu_master": 0.0,
+            "cpu_subproblem": 0.6029
+        },
+        "problem_complexity": {
+            "num_continuous_variables": 24,
+            "num_binary_variables": 0,
+            "num_equality_constraints": 18,
+            "num_inequality_constraints": 48
+        },
+        "algorithmic_metrics": {
+            "framework": "standard_interior_point",
+            "num_iterations": 1,
+            "optimality_gap_percent": 0.0
+        },
+        "hardware_metrics": {
+            "qpu_target": "none",
+            "logical_qubits": 0,
+            "physical_qubits": 0,
+            "max_chain_length": 0,
+            "circuit_depth": 0
+        }
+    }
+}
