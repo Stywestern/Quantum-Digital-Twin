@@ -11,7 +11,6 @@ except ImportError:  # standalone run of this file (demo block at the bottom)
         def __init__(self, max_time=1800):
             self.max_time = max_time
 
-
 class BaseQuboFormulator(BaseSolver):
     """
     Translates Pandapower DC-OPF problems into pure QUBO/Ising models.
@@ -67,8 +66,7 @@ class BaseQuboFormulator(BaseSolver):
 
     def __init__(self, formulation="dc_ptdf", max_time=1800, mw_precision=1.0,
                  angle_precision=None, penalty_balance=None, penalty_line=None,
-                 penalty_safety=2.0, feasibility_tol_mw=None,
-                 enforce_line_limits=True, rebalance_slack=True, **kwargs):
+                 penalty_safety=2.0, feasibility_tol_mw=None, rebalance_slack=True, **kwargs):
         """
         formulation         : "dc_ptdf" (default; "dc" is an alias) or "dc_theta".
         angle_precision     : dc_theta only. None -> per bus mw_precision / (largest susceptance at that bus);
@@ -94,7 +92,6 @@ class BaseQuboFormulator(BaseSolver):
         self.penalty_line = penalty_line
         self.penalty_safety = penalty_safety
         self.feasibility_tol_mw = feasibility_tol_mw
-        self.enforce_line_limits = enforce_line_limits
         self.rebalance_slack = rebalance_slack
 
         self.var_registry = {}
@@ -376,7 +373,7 @@ class BaseQuboFormulator(BaseSolver):
         total_load = max(sum(self._load_mw.values()), self.mw_precision)
         adj = {int(b): [] for b in net.bus.index}
         for ln in self._lines:
-            cap = ln['p_max'] if (self.enforce_line_limits and ln['p_max'] > 0.0) else total_load
+            cap = ln['p_max'] if (ln['p_max'] > 0.0) else total_load
             w = cap / abs(ln['b'])
             adj[ln['f']].append((ln['t'], w))
             adj[ln['t']].append((ln['f'], w))
@@ -564,12 +561,10 @@ class BaseQuboFormulator(BaseSolver):
         bqm = self._build_objective(bqm, net)
         if self.formulation == "dc_ptdf":
             bqm = self._build_power_balance_ptdf(bqm, net)
-            if self.enforce_line_limits:
-                bqm = self._build_line_limits_ptdf(bqm, net)
+            bqm = self._build_line_limits_ptdf(bqm, net)
         else:
             bqm = self._build_power_balance_theta(bqm, net)
-            if self.enforce_line_limits:
-                bqm = self._build_line_limits_theta(bqm, net)
+            bqm = self._build_line_limits_theta(bqm, net)
 
         R = self.var_registry
         num_dispatch_qubits = sum(len(reg['bits']) for et in self._DISPATCH_TYPES for reg in R[et].values())
@@ -583,7 +578,7 @@ class BaseQuboFormulator(BaseSolver):
                 "continuous_variables": sum(len(R[et]) for et in self._DISPATCH_TYPES)
                                         + sum(1 for r in R['bus'].values() if r['bits']),
                 "equality_constraints": 1 if self.formulation == "dc_ptdf" else len(self._active_buses),
-                "inequality_constraints": 2 * n_monitored if self.enforce_line_limits else 0,
+                "inequality_constraints": 2 * n_monitored,
             },
             "quantum_domain_qubo": {
                 "total_logical_qubits": len(bqm.variables),
@@ -645,7 +640,7 @@ class BaseQuboFormulator(BaseSolver):
 
         tol = self.feasibility_tol_mw if self.feasibility_tol_mw is not None else self.mw_precision
         balance_ok = abs(imbalance) <= tol
-        lines_ok = (not self.enforce_line_limits) or (max_line_violation <= tol)
+        lines_ok = (max_line_violation <= tol)
 
         cost = self._total_true_cost(reported)
         feasibility = {
@@ -698,8 +693,7 @@ class BaseQuboFormulator(BaseSolver):
         print(f"   QUBO {self.formulation.upper()}-OPF: COMPLETE PROBLEM DEFINITION")
         print(line)
         print(f"Total Grid Demand (Load): {round(sum(self._load_mw.values()), 3)} MW")
-        print(f"MW precision: {self.mw_precision} MW | Line limits enforced: {self.enforce_line_limits} | "
-              f"Reference bus: {self._ref_bus}\n")
+        print(f"MW precision: {self.mw_precision} MW | Reference bus: {self._ref_bus}\n")
 
         labels = {'gen': 'Gen', 'sgen': 'SGen', 'ext_grid': 'Ext_Grid (Slack)'}
 
@@ -718,7 +712,7 @@ class BaseQuboFormulator(BaseSolver):
         for w in self.cost_model_warnings:
             print(f" [cost warning] {w}")
         print(" QUBO energy = sum(costs) + lambda_balance * (balance residual)^2"
-              + (" + lambda_line * sum_lines(line residual)^2" if self.enforce_line_limits else ""))
+              + (" + lambda_line * sum_lines(line residual)^2"))
         print(" Reported cost = exact cost function of the physically balanced operating point.")
 
         # 2) variables ------------------------------------------------------
@@ -770,10 +764,9 @@ class BaseQuboFormulator(BaseSolver):
                 load = round(self._load_mw.get(bus, 0.0), 3)
                 print(f" KCL bus {bus}: {' + '.join(inj) if inj else '0'} - {load} MW load "
                       f"- outgoing[{', '.join(flows)}] = 0")
-        if self.enforce_line_limits:
-            for l_idx in self.var_registry['slack_lines']:
-                ln = next(x for x in self._lines if x['idx'] == l_idx)
-                print(f" Line {l_idx}: {round(ln['p_max'], 2)} + flow({ln['f']}->{ln['t']}) - s_line{l_idx} = 0")
+        for l_idx in self.var_registry['slack_lines']:
+            ln = next(x for x in self._lines if x['idx'] == l_idx)
+            print(f" Line {l_idx}: {round(ln['p_max'], 2)} + flow({ln['f']}->{ln['t']}) - s_line{l_idx} = 0")
         auto_b = "auto" if self.penalty_balance is None else "manual"
         auto_l = "auto" if self.penalty_line is None else "manual"
         print(f" lambda_balance = {self.lambda_balance:.6g} ({auto_b}) | lambda_line = {self.lambda_line:.6g} ({auto_l})")

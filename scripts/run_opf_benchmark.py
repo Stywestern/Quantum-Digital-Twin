@@ -7,6 +7,7 @@ if str(project_root) not in sys.path:
 
 # Import libs
 import json
+import pandapower as pp
 import pandapower.networks as nw
 from tqdm import tqdm
 
@@ -32,7 +33,7 @@ GRID_REGISTRY = {
 # Fixed seeds to ensure mathematical variance is measurable, not due to luck
 FIXED_SEEDS = [42, 1337, 2026, 9999, 5555, 12345, 98765, 10101, 24601, 8675309]
 
-def run_benchmark(target_grid, target_solver, max_time, **solver_kwargs):
+def run_benchmark(target_grid, target_solver, max_time=1800, **solver_kwargs):
     # 1. Setup save directory
     save_dir = project_root / "output" / target_grid / target_solver
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -45,6 +46,9 @@ def run_benchmark(target_grid, target_solver, max_time, **solver_kwargs):
     if target_grid not in GRID_REGISTRY:
         raise ValueError(f"Grid {target_grid} not found.")
     net = GRID_REGISTRY[target_grid]()
+    if target_grid == "case4":
+        pp.create_poly_cost(net, element=0, et="ext_grid", cp1_eur_per_mw=20.0)
+        pp.create_poly_cost(net, element=0, et="gen", cp1_eur_per_mw=30.0)
 
     if target_solver not in SOLVER_REGISTRY:
         raise ValueError(f"Solver {target_solver} not found.")
@@ -75,7 +79,8 @@ def run_benchmark(target_grid, target_solver, max_time, **solver_kwargs):
         # 5. Validate and Save Output
         feasibility = solution["grid_state"]["feasibility"]
         if not feasibility["is_feasible"]:
-            tqdm.write(f"  -> [DISCARDED] Run {itnum} is mathematically infeasible. Mismatch: {feasibility['raw_imbalance_mw']} MW raw or line limit {feasibility['max_line_violation_mw']}")
+            tqdm.write(f"  -> [DISCARDED] Run {itnum} is mathematically infeasible." 
+                       f"{feasibility['raw_imbalance_mw']} MW raw mismatch or line limit {feasibility['max_line_violation_mw']} mismatch")
 
         payload = {
             "grid": target_grid,
@@ -92,15 +97,17 @@ def run_benchmark(target_grid, target_solver, max_time, **solver_kwargs):
 
 if __name__ == "__main__":
     test_kwargs = {
-        "formulation": "dc_theta",  # Switch back to sparse B-Theta
-        "enforce_line_limits": True,
+        "formulation": "dc_theta", 
         "mw_precision": 1.0,         
-        
-        # --- SOLVER TUNING ---
         "num_reads": 500,        
         "num_sweeps": 10000,
-        "trotter_slices": 8
+
+        # Kwargs for qsa
+        #"trotter_slices": 32,
+        #"beta": 8.0,
+        #"gamma": 1.0,
     }
     
     # Run the classical stochastic solver 10 times
-    run_benchmark(target_grid="case5", target_solver="dc_qsa", max_time=1800, **test_kwargs)
+    run_benchmark(target_grid="case5", target_solver="dc_sa", max_time=1800, **test_kwargs)
+    #run_benchmark(target_grid="case5", target_solver="dc_ip")

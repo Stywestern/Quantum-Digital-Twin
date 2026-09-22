@@ -3,26 +3,26 @@
     "solver": "dc_sa",
     "max_time_allowed": 1800,
     "solution": {
-        "cost_eur_per_hr": 17532.0,
+        "cost_eur_per_hr": 17574.0,
         "generator_dispatch_mw": {
             "0": {
-                "p_mw": 28.0
+                "p_mw": 36.0
             },
             "1": {
-                "p_mw": 221.0
+                "p_mw": 49.0
             },
             "2": {
-                "p_mw": 526.0
+                "p_mw": 590.0
             }
         },
         "static_generator_dispatch_mw": {
             "0": {
-                "p_mw": 150.0
+                "p_mw": 132.0
             }
         },
         "slack_dispatch_mw": {
             "0": {
-                "p_mw": 75.0
+                "p_mw": 193.0
             }
         },
         "grid_state": {
@@ -33,55 +33,56 @@
                 "total_generation_mw": 1000.0,
                 "total_load_mw": 1000.0,
                 "raw_imbalance_mw": 0.0,
-                "raw_slack_dispatch_mw": 75.0,
-                "cost_raw_dispatch_eur": 17532.0,
-                "max_line_violation_mw": 0.441,
+                "raw_slack_dispatch_mw": 193.0,
+                "cost_raw_dispatch_eur": 17574.0,
+                "max_line_violation_mw": 0.064,
                 "tolerance_mw": 1.0,
                 "balance_ok": true,
                 "lines_ok": true,
                 "bounds_ok": true,
                 "is_feasible": true,
                 "line_flows_mw": {
-                    "0": 288.773,
-                    "1": 174.787,
-                    "2": -285.559,
-                    "3": -11.227,
-                    "4": -90.227,
-                    "5": -240.441
+                    "0": 357.07,
+                    "1": 160.866,
+                    "2": -349.936,
+                    "3": 57.07,
+                    "4": -193.93,
+                    "5": -240.064
                 },
                 "bus_angles_rad": {
-                    "0": 0.053135,
-                    "1": -0.02801,
-                    "2": -0.026797,
+                    "0": 0.048903,
+                    "1": -0.051434,
+                    "2": -0.057597,
                     "3": 0.0,
-                    "4": 0.071411
-                }
+                    "4": 0.071299
+                },
+                "max_nodal_mismatch_mw": 0.659
             }
         }
     },
     "metadata": {
         "status": "Success",
-        "solver_name": "neal_simulated_annealing_dc_ptdf",
+        "solver_name": "neal_simulated_annealing_dc_theta",
         "execution_time_seconds": {
-            "total": 76.2493,
-            "formulation_cpu": 0.0046,
-            "sampling_cpu_sa": 76.2443
+            "total": 6.9593,
+            "formulation_cpu": 0.0058,
+            "sampling_cpu_sa": 6.953
         },
         "problem_complexity": {
-            "formulation": "dc_ptdf",
+            "formulation": "dc_theta",
             "classical_domain_input": {
-                "continuous_variables": 5,
-                "equality_constraints": 1,
+                "continuous_variables": 9,
+                "equality_constraints": 5,
                 "inequality_constraints": 4
             },
             "quantum_domain_qubo": {
-                "total_logical_qubits": 61,
-                "qubits_used_for_variables": 42,
+                "total_logical_qubits": 112,
+                "qubits_used_for_variables": 93,
                 "qubits_used_for_dispatch": 42,
-                "qubits_used_for_angles": 0,
+                "qubits_used_for_angles": 51,
                 "qubits_wasted_on_slack": 19,
-                "num_interactions": 1588,
-                "offset": 123512792.90854417
+                "num_interactions": 3279,
+                "offset": 790838564.4444447
             },
             "penalties": {
                 "balance": 80.0,
@@ -93,27 +94,26 @@
             "angle_precision": null,
             "penalty_balance": null,
             "penalty_line": null,
-            "enforce_line_limits": true,
-            "seed": 5555
+            "seed": 1337
         },
         "algorithmic_metrics": {
             "framework": "pure_qubo_discretization",
             "num_iterations": 1,
             "optimality_gap_percent": 0.0,
             "sampler_stats": {
-                "num_reads_requested": 1000,
-                "num_sweeps_per_read": 50000,
-                "unique_states_found": 1000,
-                "energy_best": 17551.67,
-                "energy_mean": 21842.81,
-                "energy_worst": 41313.99,
-                "energy_std_dev": 3014.5
+                "num_reads_requested": 500,
+                "num_sweeps_per_read": 10000,
+                "unique_states_found": 500,
+                "energy_best": 17649.96,
+                "energy_mean": 3199100.33,
+                "energy_worst": 33330679.36,
+                "energy_std_dev": 5895116.62
             }
         },
         "hardware_metrics": {
             "qpu_target": "classical_cpu_simulated",
-            "logical_qubits": 61,
-            "physical_qubits": 61,
+            "logical_qubits": 112,
+            "physical_qubits": 112,
             "max_chain_length": 1,
             "circuit_depth": 0
         }

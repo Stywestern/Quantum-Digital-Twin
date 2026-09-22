@@ -11,12 +11,10 @@ from solvers.base_qubo_formulator import BaseQuboFormulator
 
 class SimulatedAnnealingSolver(BaseQuboFormulator):
     def __init__(self, formulation="dc", num_reads=500, num_sweeps=1000, max_time=1800, 
-                 mw_precision=1.0, enforce_line_limits=True, seed=None, **kwargs):
+                 mw_precision=1.0, seed=None, **kwargs):
         
         super().__init__(
-            formulation=formulation, max_time=max_time, mw_precision=mw_precision,
-            enforce_line_limits=enforce_line_limits, **kwargs
-        )
+            formulation=formulation, max_time=max_time, mw_precision=mw_precision, **kwargs)
         self.num_reads = num_reads
         self.num_sweeps = num_sweeps
         self.seed = seed
@@ -94,7 +92,6 @@ class SimulatedAnnealingSolver(BaseQuboFormulator):
                 "angle_precision": self.angle_precision,
                 "penalty_balance": self.penalty_balance,
                 "penalty_line": self.penalty_line,
-                "enforce_line_limits": self.enforce_line_limits,
                 "seed": self.seed
             },
             "algorithmic_metrics": {
@@ -126,7 +123,6 @@ if __name__ == "__main__":
     solver = SimulatedAnnealingSolver(
         formulation="dc", 
         mw_precision=1.0, 
-        enforce_line_limits=True  
     )
     
     print("Extracting QUBO matrix parameters without solving...")

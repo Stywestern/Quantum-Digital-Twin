@@ -1,28 +1,28 @@
 {
     "grid": "case5",
-    "solver": "dc_qsa",
+    "solver": "dc_sa",
     "max_time_allowed": 1800,
     "solution": {
-        "cost_eur_per_hr": 24360.0,
+        "cost_eur_per_hr": 17882.0,
         "generator_dispatch_mw": {
             "0": {
-                "p_mw": 40.0
+                "p_mw": 33.0
             },
             "1": {
-                "p_mw": 449.0
+                "p_mw": 126.0
             },
             "2": {
-                "p_mw": 222.0
+                "p_mw": 530.0
             }
         },
         "static_generator_dispatch_mw": {
             "0": {
-                "p_mw": 138.0
+                "p_mw": 164.0
             }
         },
         "slack_dispatch_mw": {
             "0": {
-                "p_mw": 151.0
+                "p_mw": 147.0
             }
         },
         "grid_state": {
@@ -32,41 +32,41 @@
             "feasibility": {
                 "total_generation_mw": 1000.0,
                 "total_load_mw": 1000.0,
-                "raw_imbalance_mw": -151.0,
-                "raw_slack_dispatch_mw": 0.0,
-                "cost_raw_dispatch_eur": 18320.0,
+                "raw_imbalance_mw": -1.0,
+                "raw_slack_dispatch_mw": 146.0,
+                "cost_raw_dispatch_eur": 17842.0,
                 "max_line_violation_mw": 0.0,
                 "tolerance_mw": 1.0,
-                "balance_ok": false,
+                "balance_ok": true,
                 "lines_ok": true,
                 "bounds_ok": true,
-                "is_feasible": false,
+                "is_feasible": true,
                 "line_flows_mw": {
-                    "0": 160.704,
-                    "1": 108.538,
-                    "2": -91.242,
-                    "3": -139.296,
-                    "4": 9.704,
-                    "5": -130.758
+                    "0": 326.249,
+                    "1": 166.543,
+                    "2": -295.792,
+                    "3": 26.249,
+                    "4": -147.751,
+                    "5": -234.208
                 },
                 "bus_angles_rad": {
-                    "0": 0.032996,
-                    "1": -0.012162,
-                    "2": 0.002882,
+                    "0": 0.050629,
+                    "1": -0.041047,
+                    "2": -0.043882,
                     "3": 0.0,
-                    "4": 0.038835
+                    "4": 0.06956
                 },
-                "max_nodal_mismatch_mw": 215.125
+                "max_nodal_mismatch_mw": 0.478
             }
         }
     },
     "metadata": {
         "status": "Success",
-        "solver_name": "openjij_sqa_dc_theta",
+        "solver_name": "neal_simulated_annealing_dc_theta",
         "execution_time_seconds": {
-            "total": 344.6416,
-            "formulation_cpu": 0.009,
-            "sampling_cpu_sqa": 344.6316
+            "total": 7.2207,
+            "formulation_cpu": 0.0059,
+            "sampling_cpu_sa": 7.2143
         },
         "problem_complexity": {
             "formulation": "dc_theta",
@@ -94,8 +94,7 @@
             "angle_precision": null,
             "penalty_balance": null,
             "penalty_line": null,
-            "enforce_line_limits": true,
-            "seed": 42
+            "seed": 24601
         },
         "algorithmic_metrics": {
             "framework": "pure_qubo_discretization",
@@ -104,16 +103,15 @@
             "sampler_stats": {
                 "num_reads_requested": 500,
                 "num_sweeps_per_read": 10000,
-                "trotter_slices": 8,
                 "unique_states_found": 500,
-                "energy_best": 822.29,
-                "energy_mean": 7641.67,
-                "energy_worst": 32173.19,
-                "energy_std_dev": 4424.54
+                "energy_best": 17922.34,
+                "energy_mean": 3529297.89,
+                "energy_worst": 39663447.42,
+                "energy_std_dev": 6195711.75
             }
         },
         "hardware_metrics": {
-            "qpu_target": "classical_cpu_sqa_simulated",
+            "qpu_target": "classical_cpu_simulated",
             "logical_qubits": 112,
             "physical_qubits": 112,
             "max_chain_length": 1,

@@ -3,26 +3,26 @@
     "solver": "dc_sa",
     "max_time_allowed": 1800,
     "solution": {
-        "cost_eur_per_hr": 17521.0,
+        "cost_eur_per_hr": 17522.0,
         "generator_dispatch_mw": {
             "0": {
-                "p_mw": 39.0
+                "p_mw": 28.0
             },
             "1": {
-                "p_mw": 293.0
+                "p_mw": 202.0
             },
             "2": {
-                "p_mw": 487.0
+                "p_mw": 526.0
             }
         },
         "static_generator_dispatch_mw": {
             "0": {
-                "p_mw": 157.0
+                "p_mw": 158.0
             }
         },
         "slack_dispatch_mw": {
             "0": {
-                "p_mw": 24.0
+                "p_mw": 86.0
             }
         },
         "grid_state": {
@@ -33,28 +33,28 @@
                 "total_generation_mw": 1000.0,
                 "total_load_mw": 1000.0,
                 "raw_imbalance_mw": 0.0,
-                "raw_slack_dispatch_mw": 24.0,
-                "cost_raw_dispatch_eur": 17521.0,
-                "max_line_violation_mw": 0.0,
+                "raw_slack_dispatch_mw": 86.0,
+                "cost_raw_dispatch_eur": 17522.0,
+                "max_line_violation_mw": 0.357,
                 "tolerance_mw": 1.0,
                 "balance_ok": true,
                 "lines_ok": true,
                 "bounds_ok": true,
                 "is_feasible": true,
                 "line_flows_mw": {
-                    "0": 260.914,
-                    "1": 182.263,
-                    "2": -247.177,
-                    "3": -39.086,
-                    "4": -46.086,
-                    "5": -239.823
+                    "0": 296.955,
+                    "1": 174.688,
+                    "2": -285.643,
+                    "3": -3.045,
+                    "4": -101.045,
+                    "5": -240.357
                 },
                 "bus_angles_rad": {
-                    "0": 0.055408,
-                    "1": -0.017909,
-                    "2": -0.013688,
+                    "0": 0.053105,
+                    "1": -0.030339,
+                    "2": -0.03001,
                     "3": 0.0,
-                    "4": 0.071227
+                    "4": 0.071386
                 }
             }
         }
@@ -63,9 +63,9 @@
         "status": "Success",
         "solver_name": "neal_simulated_annealing_dc_ptdf",
         "execution_time_seconds": {
-            "total": 76.7969,
-            "formulation_cpu": 0.0043,
-            "sampling_cpu_sa": 76.7918
+            "total": 7.9129,
+            "formulation_cpu": 0.0039,
+            "sampling_cpu_sa": 7.9086
         },
         "problem_complexity": {
             "formulation": "dc_ptdf",
@@ -93,7 +93,6 @@
             "angle_precision": null,
             "penalty_balance": null,
             "penalty_line": null,
-            "enforce_line_limits": true,
             "seed": 12345
         },
         "algorithmic_metrics": {
@@ -101,13 +100,13 @@
             "num_iterations": 1,
             "optimality_gap_percent": 0.0,
             "sampler_stats": {
-                "num_reads_requested": 1000,
-                "num_sweeps_per_read": 50000,
-                "unique_states_found": 1000,
-                "energy_best": 17524.1,
-                "energy_mean": 22030.58,
-                "energy_worst": 64112.96,
-                "energy_std_dev": 3931.62
+                "num_reads_requested": 500,
+                "num_sweeps_per_read": 10000,
+                "unique_states_found": 500,
+                "energy_best": 17532.39,
+                "energy_mean": 22151.68,
+                "energy_worst": 44845.22,
+                "energy_std_dev": 3610.14
             }
         },
         "hardware_metrics": {

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 class BaseSolver(ABC):
-    def __init__(self, max_time=0):
+    def __init__(self, max_time=1800):
         self.max_time = max_time
 
     @abstractmethod
