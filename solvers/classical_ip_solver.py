@@ -1,22 +1,13 @@
-import sys
-from pathlib import Path
-project_root = Path(__file__).resolve().parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 import time
 import pandapower as pp
 import pandapower.networks as nw
 import numpy as np
-from solvers.base_solver import BaseSolver
 
-class ClassicalIPSolver(BaseSolver):
-    def __init__(self, formulation="ac", max_time=1800, **kwargs):
-        super().__init__(max_time=max_time) if hasattr(super(), '__init__') else None
+class ClassicalIPSolver():
+    def __init__(self, formulation="ac", **kwargs):
         if formulation not in ["ac", "dc"]:
             raise ValueError("Formulation must be 'ac' or 'dc'")
         self.formulation = formulation
-        self.max_time = max_time
 
     def _calculate_complexity(self, net):
         """Calculates mathematical dimensions based on the formulation."""

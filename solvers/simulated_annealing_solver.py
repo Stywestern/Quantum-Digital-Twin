@@ -7,7 +7,7 @@ if str(project_root) not in sys.path:
 import time
 import numpy as np
 import neal
-from solvers.base_qubo_formulator import BaseQuboFormulator
+from solvers.qubo_formulator import BaseQuboFormulator
 
 class SimulatedAnnealingSolver(BaseQuboFormulator):
     def __init__(self, formulation="dc", num_reads=500, num_sweeps=1000, max_time=1800, 

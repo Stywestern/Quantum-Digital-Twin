@@ -6,7 +6,7 @@ if str(project_root) not in sys.path:
 
 import time
 import numpy as np
-from solvers.base_qubo_formulator import BaseQuboFormulator
+from solvers.qubo_formulator import BaseQuboFormulator
 
 try:
     import openjij as oj
@@ -21,74 +21,6 @@ except ImportError:
 
 
 class SimulatedQuantumAnnealingSolver(BaseQuboFormulator):
-    """
-    SQA (path-integral Monte Carlo on the transverse-field Ising model, via OpenJij's SQASampler)
-    applied to the DC-OPF QUBO built by BaseQuboFormulator.
-
-    Changes from the previous version, and why
-    --------------------------------------------
-    2. Sampling is still a per-read Python loop, each call given its own explicit seed drawn from
-       a numpy Generator seeded once by `self.seed` -- THIS PART OF THE ORIGINAL CODE WAS ALREADY
-       CORRECT and is kept. Two things were tried and rejected while fixing this file, noted here
-       so they aren't "fixed" again by a future edit:
-         - Passing a single `seed=` to `sample(..., num_reads=N)` with N > 1: in the installed
-           OpenJij version this makes every read IDENTICAL (confirmed: energy_std_dev was exactly
-           0.0 across reads) -- this alone was enough to explain "huge mismatches", since 500
-           supposedly-independent reads were really 1 read repeated 500 times.
-         - Seeding only numpy's global RNG once and calling sample(..., num_reads=N, seed=None):
-           looked reproducible on a trivial 2-variable toy problem, but is NOT reproducible on the
-           real (61+ variable) case5 QUBO -- confirmed by running it twice with an identical numpy
-           seed and getting different energies both times. The toy problem's "reproducibility" was
-           a false positive: a 2-variable problem has so few reachable states that unrelated seeds
-           can land on the same energy by chance, not because the RNG was actually controlled.
-       Measured overhead of the per-read loop vs. one batched call, same total reads/sweeps: no
-       measurable difference (looping is not the performance problem here; premature freezing and
-       an unnormalized coefficient range are).
-
-    3. The BQM given to the sampler is normalized (divided by its largest absolute coefficient,
-       so max|coefficient| = 1) before sampling; energies are reported back in EUR by undoing the
-       scale, directly comparable to `neal` (classical SA) runs on the unnormalized BQM.
-       *** Normalization alone is NOT a fix. *** This QUBO's coefficients span several orders of
-       magnitude (bounded-coefficient radix weights range from `mw_precision` up to roughly half
-       an asset's dispatch range, and the line-limit penalty squares those weights), so a single
-       global scale factor crushes the small, meaningful coefficients toward zero relative to beta
-       while leaving the few huge ones dominant. `dynamic_range` (max/min nonzero |coefficient| of
-       the unnormalized BQM) is reported in `sampler_stats` so this can be monitored; a large value
-       (case5 at mw_precision=1.0 is ~1.8e6) is a sign the *problem* itself needs a smaller
-       dynamic range (larger `mw_precision`, tighter asset/line bounds), not just better solver
-       tuning. NOTE the tolerance coupling: this formulator's default `feasibility_tol_mw` equals
-       `mw_precision`, so coarsening `mw_precision` also loosens what counts as feasible -- pass
-       `feasibility_tol_mw` explicitly to hold the feasibility bar fixed while exploring precision.
-
-    4. beta/gamma are chosen so that beta*gamma/trotter = O(1) at the start of a (now log-spaced,
-       see point 5) schedule, instead of a beta so large that tanh(beta*gamma*(1-s)/trotter)
-       saturates near s=0 and the transverse (quantum) term is effectively off for the whole run.
-
-    5. A custom, log-spaced `schedule` replaces OpenJij's default quartic one, so an equal share of
-       sweeps is spent at each energy decade -- similar to what `neal`'s default geometric beta
-       schedule does.
-
-    6. Optional greedy (steepest-descent) post-processing of every SQA read via dwave-samplers'
-       SteepestDescentSolver, run on the ORIGINAL (unnormalized) bqm -- exact local descent on the
-       real energy landscape, essentially free next to the SQA sampling itself. `sampler_stats`
-       keeps both the raw best and the post-greedy best so you can see how much of the remaining
-       gap was just local roughness (closed by greedy) versus SQA landing in the wrong basin
-       entirely (not closed by greedy).
-
-    7. `trotter_spread`: the gap between the best and worst classical-energy Trotter slice of the
-       best read, in normalized units. NOTE: response.info['trotter_energies'] (as documented in
-       SQASampler._get_result's own docstring) is NOT where this ends up in the installed version
-       once reads are looped -- each single-read Response stores it at
-       response.info['system'][0]['trotter_energies']. A large spread at s=1 means the Trotter
-       slices never agreed by the end of the schedule -- a sign to run more sweeps or a slower
-       schedule, not just a different seed.
-
-    8. `optimality_gap_percent` is computed from `reference_cost_eur_per_hr` (e.g. from a
-       `pandapower.rundcopp()` run on the same net) if supplied, and only when the decoded solution
-       is feasible -- comparing costs of an infeasible dispatch to a feasible reference isn't
-       meaningful. It is left as None otherwise, rather than hardcoded to 0.0.
-    """
-
     def __init__(self, formulation="dc_ptdf", num_reads=300, num_sweeps=5000, max_time=1800,
                  mw_precision=1.0, trotter_slices=32, beta=8.0, gamma=1.0, schedule_points=40, schedule_s_min=1e-4,
                  postprocess_greedy=True, seed=None, **kwargs):

@@ -16,11 +16,14 @@ from solvers.classical_ip_solver import ClassicalIPSolver
 from solvers.simulated_annealing_solver import SimulatedAnnealingSolver
 from solvers.quantum_annealing_sim_solver import SimulatedQuantumAnnealingSolver
 
+# Import my grids
+from homemade_grids.small_grids import create_case3_low_gen, create_case3_high_gen, create_case4_low_gen, create_case4_high_gen
+
 SOLVER_REGISTRY = {
     "ac_ip": lambda **kwargs: ClassicalIPSolver(formulation="ac", **kwargs),
     "dc_ip": lambda **kwargs: ClassicalIPSolver(formulation="dc", **kwargs),
     "dc_sa": lambda **kwargs: SimulatedAnnealingSolver(**kwargs),
-    "dc_qsa": lambda **kwargs: SimulatedQuantumAnnealingSolver(**kwargs)
+    "dc_sqa": lambda **kwargs: SimulatedQuantumAnnealingSolver(**kwargs)
 }
 
 GRID_REGISTRY = {
@@ -28,6 +31,13 @@ GRID_REGISTRY = {
     "case5": nw.case5,
     "case9": nw.case9,
     "case14": nw.case14
+}
+
+MICROGRID_REGISTRY = {
+    "case3_low": create_case3_low_gen,
+    "case3_high": create_case3_high_gen,
+    "case4_low": create_case4_low_gen,
+    "case4_high": create_case4_high_gen
 }
 
 # Fixed seeds to ensure mathematical variance is measurable, not due to luck
@@ -98,16 +108,16 @@ def run_benchmark(target_grid, target_solver, max_time=1800, **solver_kwargs):
 if __name__ == "__main__":
     test_kwargs = {
         "formulation": "dc_theta", 
-        "mw_precision": 1.0,         
+        "mw_precision": 10.0,         
         "num_reads": 500,        
         "num_sweeps": 10000,
 
-        # Kwargs for qsa
+        # Kwargs for sqa
         #"trotter_slices": 32,
         #"beta": 8.0,
         #"gamma": 1.0,
     }
     
     # Run the classical stochastic solver 10 times
-    run_benchmark(target_grid="case5", target_solver="dc_sa", max_time=1800, **test_kwargs)
+    run_benchmark(target_grid="case5", target_solver="dc_sqa", max_time=1800, **test_kwargs)
     #run_benchmark(target_grid="case5", target_solver="dc_ip")
