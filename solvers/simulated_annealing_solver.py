@@ -5,11 +5,12 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import time
+import copy
 import numpy as np
 import neal
-from solvers.qubo_formulator import BaseQuboFormulator
+from solvers.qubo_formulator import QuboFormulator
 
-class SimulatedAnnealingSolver(BaseQuboFormulator):
+class SimulatedAnnealingSolver(QuboFormulator):
     def __init__(self, formulation="dc", num_reads=500, num_sweeps=1000, max_time=1800, 
                  mw_precision=1.0, seed=None, **kwargs):
         
@@ -20,7 +21,7 @@ class SimulatedAnnealingSolver(BaseQuboFormulator):
         self.seed = seed
         self.sampler = neal.SimulatedAnnealingSampler()
 
-    def solve(self, net):
+    def solve_opf(self, net):
         start_time = time.time()
         status, cost, dispatch, sgen_dispatch, slack_dispatch = "Success", None, {}, {}, {}
         form_time, samp_time = 0.0, 0.0
@@ -64,6 +65,17 @@ class SimulatedAnnealingSolver(BaseQuboFormulator):
 
         exec_time = round(time.time() - start_time, 4)
         
+        # Safely calculate max line loading percentage from the decoded flows
+        max_load_pct = None
+        if hasattr(self, '_lines') and self._lines:
+            loadings = []
+            for ln in self._lines:
+                if ln['p_max'] > 0.0:
+                    flow = abs(feasibility["line_flows_mw"].get(ln['idx'], 0.0))
+                    loadings.append((flow / ln['p_max']) * 100.0)
+            if loadings:
+                max_load_pct = round(max(loadings), 3)
+
         # 4. Final Solution and Metadata Assembly
         solution = {
             "cost_eur_per_hr": cost,
@@ -71,7 +83,7 @@ class SimulatedAnnealingSolver(BaseQuboFormulator):
             "static_generator_dispatch_mw": sgen_dispatch,
             "slack_dispatch_mw": slack_dispatch,
             "grid_state": {
-                "max_line_loading_percent": None,
+                "max_line_loading_percent": max_load_pct,
                 "max_voltage_pu": 1.0 if self.formulation == "dc" else None,
                 "min_voltage_pu": 1.0 if self.formulation == "dc" else None,
                 "feasibility": feasibility
@@ -89,9 +101,9 @@ class SimulatedAnnealingSolver(BaseQuboFormulator):
             "problem_complexity": complexity,
             "qubo_parameters": {
                 "mw_precision": self.mw_precision,
-                "angle_precision": self.angle_precision,
-                "penalty_balance": self.penalty_balance,
-                "penalty_line": self.penalty_line,
+                "angle_precision": getattr(self, 'angle_precision', None),
+                "penalty_balance": getattr(self, 'penalty_balance', None),
+                "penalty_line": getattr(self, 'penalty_line', None),
                 "seed": self.seed
             },
             "algorithmic_metrics": {
@@ -111,19 +123,35 @@ class SimulatedAnnealingSolver(BaseQuboFormulator):
         
         return solution, metadata
 
-# =============================================================================
-# Execution Block to inspect Case5
-# =============================================================================
-if __name__ == "__main__":
-    import pandapower.networks as nw
-    print("Loading case5...")
-    net = nw.case5()
-    
-    print("Instantiating QUBO SA Solver (DC)...")
-    solver = SimulatedAnnealingSolver(
-        formulation="dc", 
-        mw_precision=1.0, 
-    )
-    
-    print("Extracting QUBO matrix parameters without solving...")
-    bqm, complexity = solver.view_problem_definition(net)
+    def solve_pf(self, net):
+        """Executes a QUBO Power Flow by locking economic variables."""
+        net_pf = copy.deepcopy(net)
+        
+        # 1. Lock dispatchable assets to eliminate decision variables
+        for idx in net_pf.gen.index:
+            p = float(net_pf.gen.at[idx, 'p_mw']) if not np.isnan(net_pf.gen.at[idx, 'p_mw']) else 0.0
+            net_pf.gen.at[idx, 'min_p_mw'] = p
+            net_pf.gen.at[idx, 'max_p_mw'] = p
+            
+        for idx in net_pf.ext_grid.index:
+            if 'p_mw' in net_pf.ext_grid.columns and not np.isnan(net_pf.ext_grid.at[idx, 'p_mw']):
+                p = float(net_pf.ext_grid.at[idx, 'p_mw'])
+            else:
+                p = 0.0
+            net_pf.ext_grid.at[idx, 'min_p_mw'] = p
+            net_pf.ext_grid.at[idx, 'max_p_mw'] = p
+
+        # 2. Strip cost polynomials
+        net_pf.poly_cost = net_pf.poly_cost.iloc[0:0]
+        if hasattr(net_pf, 'pwl_cost'):
+            net_pf.pwl_cost = net_pf.pwl_cost.iloc[0:0]
+
+        # 3. Solve using the core QUBO workflow
+        solution, metadata = self.solve_opf(net_pf)
+        
+        # 4. Tweak outputs for PF context
+        solution["cost_eur_per_hr"] = None
+        metadata["solver_name"] = f"neal_simulated_annealing_pf_{self.formulation}"
+        metadata["algorithmic_metrics"]["framework"] = "pure_qubo_discretization_pf"
+        
+        return solution, metadata

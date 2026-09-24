@@ -5,54 +5,6 @@ import dimod
 import numpy as np
 
 class QuboFormulator():
-    """
-    Translates Pandapower DC-OPF problems into pure QUBO/Ising models.
-    Does not execute solvers. Designed to be inherited by SA, QA, and QAOA solvers.
-
-    Public interface for subclasses:
-        _formulate_qubo(net)          -> (bqm, complexity)
-        _decode_solution(sample, net) -> (gen_dispatch, sgen_dispatch, ext_dispatch, cost, feasibility)
-        view_problem_definition(net)
-
-    Formulations (same DC-OPF, same optimum; they differ only in how the physics is encoded)
-    -----------------------------------------------------------------------------------------
-    "dc_ptdf" (default, alias "dc"):
-        Bus angles are eliminated. Variables: dispatch bits + line-limit slack bits.
-        Constraints: ONE global power balance, and one limit per monitored line written with
-        PTDF factors:  flow_l = sum_i PTDF[l,i] * (P_i - load_i).
-        Reference bus = bus of the first in-service ext_grid (its PTDF column is zero).
-    "dc_theta":
-        Classic B-theta model: dispatch bits + per-bus angle bits, one KCL per bus.
-        With several ext_grids all their buses are pinned to 0 rad (PTDF does not do that).
-
-    Bit encodings (how a single bounded variable x in [lo, hi] is written in binary; same physics,
-    different QUBO. Applies uniformly to every encoded variable: dispatch, dc_theta angles, and
-    line-limit slack bits, since they all go through `_register` -> `_get_weights`)
-    -----------------------------------------------------------------------------------------
-    "radix" (default): bounded-coefficient binary weights precision*{1,2,4,...,2^(K-1)} plus one
-        remainder weight (see `_get_radix_weights`). O(log2(range/precision)) bits per variable --
-        qubit-efficient, but has HAMMING CLIFFS: some adjacent grid steps require flipping many
-        bits at once (e.g. 0111 -> 1000), because the weight of the bit that must flip to cross
-        that boundary can be much larger than one grid step. A local-search or annealing move that
-        only flips one or two bits at a time can therefore fail to reach an adjacent, often better,
-        state, even though it is "next door" in value.
-    "unary": every bit has an EQUAL weight of `precision` (a "thermometer" code: value = lo +
-        precision * (number of 1-bits), independent of WHICH bits are 1), except the single
-        remainder bit needed to make the weights sum to exactly (hi - lo), matching the radix
-        encoding's exactness. O(range/precision) bits per variable -- one bit per reachable grid
-        state, hence "every possible state is a bit" -- but flipping ANY ONE bit always changes
-        the value by exactly one grid step (or the remainder step), by construction: there is no
-        Hamming cliff, ever, because there is nothing for the weight of an individual bit to be
-        large relative to. No extra validity constraint is needed (unlike a strict one-hot
-        encoding, which would need a penalty enforcing "exactly one bit set" and gains nothing
-        further for this purpose): every one of the 2^N bit combinations maps to a well-defined,
-        in-range value through its bit count, so `_decode_value`, `_add_polynomial_cost` and every
-        constraint builder below work on it completely unchanged.
-        The cost of removing Hamming cliffs this way is qubits: `mw_precision=1.0` on a 500 MW
-        generator is ~9 bits under "radix" and ~500 bits under "unary". This is a genuine, and
-        usually severe, qubit-count-vs-locality trade-off to characterize, not a strictly better
-        encoding -- see WP2's resource-vs-quality framing.
-    """
 
     # Line ratings that are missing / absurdly large are treated as "unconstrained".
     UNCONSTRAINED_I_KA = 100.0
@@ -63,13 +15,14 @@ class QuboFormulator():
     ANGLE_HEADROOM = 1.1
 
     FORMULATIONS = ("dc_ptdf", "dc_theta")
-    ENCODINGS = ("radix", "unary")
+    ENCODINGS = ("radix", "unary", "hybrid", "iterative")
     _DISPATCH_TYPES = ("gen", "sgen", "ext_grid")
     _BIT_PREFIX = {"gen": "gen", "sgen": "sgen", "ext_grid": "ext"}
 
     def __init__(self, formulation="dc_ptdf", encoding="radix", mw_precision=1.0,
                  angle_precision=None, penalty_balance=None, penalty_line=None,
-                 penalty_safety=2.0, feasibility_tol_mw=None, rebalance_slack=True, **kwargs):
+                 penalty_safety=1.2, feasibility_tol_mw=None, rebalance_slack=True, 
+                 ptdf_threshold=0.05, hybrid_chunk_size=10.0, **kwargs):
         """
         formulation         : "dc_ptdf" (default; "dc" is an alias) or "dc_theta".
         encoding             : "radix" (default) or "unary" -- how every bounded variable is
@@ -101,11 +54,16 @@ class QuboFormulator():
         self.penalty_safety = penalty_safety
         self.feasibility_tol_mw = feasibility_tol_mw
         self.rebalance_slack = rebalance_slack
+        self.ptdf_threshold = ptdf_threshold
+        self.hybrid_chunk_size = hybrid_chunk_size
 
         self.var_registry = {}
         self.cost_model_warnings = []
         self.lambda_balance = penalty_balance
         self.lambda_line = penalty_line
+
+        self.iterative_bases = {}
+        self.iterative_delta = 0.0
 
     # ------------------------------------------------------------------ #
     # Small helpers
@@ -169,17 +127,52 @@ class QuboFormulator():
             weights.append(remainder)
         return weights
 
+    def set_iterative_state(self, bases: dict, delta: float):
+        """Used by the Iterative Solver to update the search center and radius."""
+        self.iterative_bases = bases
+        self.iterative_delta = delta
+
+    def _get_hybrid_weights(self, total_range, precision):
+        """Uses Unary for bulk capacity (e.g., 10 MW chunks) and Radix for fine precision."""
+        if total_range <= 1e-12:
+            return []
+        
+        # 1. Unary for the bulk
+        n_unary = int(math.floor(total_range / self.hybrid_chunk_size + 1e-9))
+        unary_weights = [self.hybrid_chunk_size] * n_unary
+        
+        # 2. Radix for the fine precision remainder
+        remainder = total_range - (n_unary * self.hybrid_chunk_size)
+        radix_weights = self._get_radix_weights(remainder, precision)
+        
+        return unary_weights + radix_weights
+
     def _get_weights(self, total_range, precision):
-        """Dispatches to the weight scheme selected by `self.encoding` (see class docstring)."""
+        """Dispatches to the weight scheme selected by `self.encoding`."""
         if self.encoding == "unary":
             return self._get_unary_weights(total_range, precision)
-        return self._get_radix_weights(total_range, precision)
+        if self.encoding == "hybrid":
+            return self._get_hybrid_weights(total_range, precision)
+        if self.encoding == "radix":
+            return self._get_radix_weights(total_range, precision)
 
-    def _register(self, group, key, prefix, lo, hi, precision):
-        weights = self._get_weights(hi - lo, precision) if hi > lo else []
+    def _register(self, group, key, prefix, abs_lo, abs_hi, precision):
+        if self.encoding == "iterative":
+            # 1. Find the current base value (default to midpoint)
+            base = self.iterative_bases.get(group, {}).get(key, (abs_lo + abs_hi) / 2.0)
+            # 2. Define local step bounds, clamped by physical absolute bounds
+            lo = max(abs_lo, base - self.iterative_delta)
+            hi = min(abs_hi, base + self.iterative_delta)
+            # 3. Create exactly 1 bit representing the step from lo to hi
+            weights = [hi - lo] if hi > lo else []
+        else:
+            lo, hi = abs_lo, abs_hi
+            weights = self._get_weights(hi - lo, precision) if hi > lo else []
+            
         bits = [f"{prefix}_bit_{k}" for k in range(len(weights))]
-        self.var_registry[group][key] = {'min': lo, 'max': hi, 'precision': precision,
-                                         'bits': bits, 'weights': weights}
+        self.var_registry[group][key] = {
+            'min': lo, 'max': hi, 'precision': precision, 'bits': bits, 'weights': weights
+        }
         return len(bits)
 
     @staticmethod
@@ -392,7 +385,13 @@ class QuboFormulator():
             except np.linalg.LinAlgError as exc:
                 raise ValueError("Reduced susceptance matrix is singular (check line reactances/topology).") from exc
         self._X = X
-        self._H = {ln['idx']: ln['b'] * (X[pos[ln['f']]] - X[pos[ln['t']]]) for ln in self._lines}
+
+        self._H = {}
+        for ln in self._lines:
+            raw_h = ln['b'] * (X[pos[ln['f']]] - X[pos[ln['t']]])
+            # TRUNCATION: zero out weak sensitivities to enforce QPU sparsity
+            truncated_h = np.where(np.abs(raw_h) < self.ptdf_threshold, 0.0, raw_h)
+            self._H[ln['idx']] = truncated_h
 
     def _compute_angle_bounds(self, net):
         """
@@ -459,21 +458,32 @@ class QuboFormulator():
 
         return total_qubits
 
-    def _resolve_penalties(self):
-        """
-        Violating a constraint by delta MW can save at most (max marginal cost) * delta of objective, while
-        it costs lambda * delta^2 in penalty. lambda >= c_max / precision therefore makes every violation of
-        at least one MW grid step unprofitable; `penalty_safety` adds headroom.
-        """
+    def _resolve_penalties(self, net):
+        bus_costs = {}
         marginals = []
-        for et in self._DISPATCH_TYPES:
-            for idx, reg in self.var_registry[et].items():
-                _, c1, c2 = self._cost_coeffs(et, idx)
-                marginals.append(abs(c1) + 2.0 * abs(c2) * reg['max'])
-        c_max = max(marginals + [1.0])
-        auto = self.penalty_safety * c_max / self.mw_precision
-        self.lambda_balance = self.penalty_balance if self.penalty_balance is not None else auto
-        self.lambda_line = self.penalty_line if self.penalty_line is not None else auto
+        
+        # Track marginal costs per-bus
+        for et, idx, reg, bus in self._dispatch_assets(net):
+            _, c1, c2 = self._cost_coeffs(et, idx)
+            c_val = abs(c1) + 2.0 * abs(c2) * reg['max']
+            marginals.append(c_val)
+            bus_costs[bus] = max(bus_costs.get(bus, 0.0), c_val)
+            
+        c_max_global = max(marginals + [1.0])
+        auto_bal = self.penalty_safety * c_max_global / self.mw_precision
+        self.lambda_balance = self.penalty_balance if self.penalty_balance is not None else auto_bal
+        
+        # Localize line penalties
+        self.lambda_line = {}
+        for ln in self._lines:
+            if self.penalty_line is not None:
+                self.lambda_line[ln['idx']] = self.penalty_line
+            else:
+                # Base penalty on the cost of the connected buses. If neither has generation, use 50% of global.
+                local_c = max(bus_costs.get(ln['f'], 0.0), bus_costs.get(ln['t'], 0.0))
+                if local_c < 1.0: 
+                    local_c = c_max_global * 0.5 
+                self.lambda_line[ln['idx']] = self.penalty_safety * local_c / self.mw_precision
 
     # ------------------------------------------------------------------ #
     # QUBO terms
@@ -516,7 +526,7 @@ class QuboFormulator():
         slack = self.var_registry['slack_lines'][ln['idx']]
         for bit, w in zip(slack['bits'], slack['weights']):
             terms[bit] = terms.get(bit, 0.0) - w
-        self._add_squared_penalty(bqm, terms, constant, self.lambda_line)
+        self._add_squared_penalty(bqm, terms, constant, self.lambda_line[ln['idx']])
 
     # --- dc_ptdf constraints ---
     def _build_power_balance_ptdf(self, bqm, net):
@@ -590,7 +600,7 @@ class QuboFormulator():
     def _formulate_qubo(self, net):
         self._prepare_network(net)
         self._encode_variables(net)
-        self._resolve_penalties()
+        self._resolve_penalties(net)
 
         bqm = dimod.BinaryQuadraticModel.empty(dimod.BINARY)
         bqm = self._build_objective(bqm, net)
@@ -642,7 +652,10 @@ class QuboFormulator():
                 "dynamic_range": round(float(dynamic_range), 2),
                 "dac_precision_warning": bool(dynamic_range > 256.0)
             },
-            "penalties": {"balance": float(self.lambda_balance), "line": float(self.lambda_line)},
+            "penalties": {
+                "balance": float(self.lambda_balance), 
+                "line": self.lambda_line if isinstance(self.lambda_line, dict) else float(self.lambda_line)
+            },
         }
 
         return bqm, complexity
@@ -821,9 +834,18 @@ class QuboFormulator():
         for l_idx in self.var_registry['slack_lines']:
             ln = next(x for x in self._lines if x['idx'] == l_idx)
             print(f" Line {l_idx}: {round(ln['p_max'], 2)} + flow({ln['f']}->{ln['t']}) - s_line{l_idx} = 0")
+
         auto_b = "auto" if self.penalty_balance is None else "manual"
         auto_l = "auto" if self.penalty_line is None else "manual"
-        print(f" lambda_balance = {self.lambda_balance:.6g} ({auto_b}) | lambda_line = {self.lambda_line:.6g} ({auto_l})")
+        
+        if isinstance(self.lambda_line, dict):
+            l_min = min(self.lambda_line.values()) if self.lambda_line else 0.0
+            l_max = max(self.lambda_line.values()) if self.lambda_line else 0.0
+            line_str = f"[{l_min:.2f} to {l_max:.2f}]"
+        else:
+            line_str = f"{self.lambda_line:.6g}"
+            
+        print(f" lambda_balance = {self.lambda_balance:.6g} ({auto_b}) | lambda_line = {line_str} ({auto_l})")
 
         # 4) size summary ---------------------------------------------------
         c, q = complexity['classical_domain_input'], complexity['quantum_domain_qubo']
@@ -840,42 +862,127 @@ class QuboFormulator():
 if __name__ == "__main__":
     import copy
     import warnings
+    import itertools
+    import pandas as pd
 
     import pandapower as pp
     import pandapower.networks as pn
+    from homemade_grids.small_grids import case3_low_gen
 
     warnings.filterwarnings("ignore")
-    net = pn.case5()
+    net = case3_low_gen()
 
-    net_ip = copy.deepcopy(net)
-    pp.rundcopp(net_ip)
-    ip_cost = float(net_ip.res_cost)
-
-    print("--- ENCODING COMPARISON (same DC-OPF, same optimum, different qubit count) ---")
-    for encoding in QuboFormulator.ENCODINGS:
-        f = QuboFormulator(formulation="dc_ptdf", mw_precision=1.0, encoding=encoding)
+    print("\n" + "="*115)
+    print(" QUBO CONSTANT EXPLORATION (case5) ".center(115, "="))
+    print("="*115)
+    
+    rows = []
+    
+    # Iterate through all 8 combinations
+    combinations = itertools.product(
+        QuboFormulator.FORMULATIONS, 
+        QuboFormulator.ENCODINGS, 
+        [10.0, 1.0]
+    )
+    
+    for form, enc, prec in combinations:
+        f = QuboFormulator(formulation=form, encoding=enc, mw_precision=prec)
         bqm, cx = f._formulate_qubo(net)
+        
+        # Extract constants
+        h_mags = [abs(v) for v in bqm.linear.values() if abs(v) > 1e-12]
+        j_mags = [abs(v) for v in bqm.quadratic.values() if abs(v) > 1e-12]
+        
+        max_h = max(h_mags) if h_mags else 0.0
+        max_j = max(j_mags) if j_mags else 0.0
+        
         q = cx["quantum_domain_qubo"]
-        print(f" {encoding:<6}: {q['total_logical_qubits']:>5} qubits "
-              f"(dispatch {q['qubits_used_for_dispatch']}, slack {q['qubits_wasted_on_slack']}), "
-              f"{q['num_interactions']:>6} quadratic terms")
+        hw = cx["hardware_limits"]
+        pens = cx["penalties"]
+        
+        rows.append({
+            "Form": form,
+            "Enc": enc,
+            "Prec": prec,
+            "Qubits": q["total_logical_qubits"],
+            "Penalty (\u03BB)": round(pens["balance"], 1),
+            "Offset": round(bqm.offset, 1),
+            "Max Lin (h)": round(max_h, 1),
+            "Max Quad (J)": round(max_j, 1),
+            "Dyn Range": round(hw["dynamic_range"], 1)
+        })
+        
+    df = pd.DataFrame(rows)
+    print(df.to_string(index=False))
+    print("="*115 + "\n")
+    
+    # --- DEEP DIVE: The Epiphany ---
+    print("--- DEEP DIVE: WHY RADIX EXPLODES (dc_ptdf, radix, prec=1.0) ---")
+    f = QuboFormulator(formulation="dc_ptdf", encoding="radix", mw_precision=1.0)
+    bqm, cx = f._formulate_qubo(net)
+    
+    # Find the single largest interaction in the matrix
+    max_j_val = 0
+    max_j_pair = None
+    for (u, v), val in bqm.quadratic.items():
+        if abs(val) > max_j_val:
+            max_j_val = abs(val)
+            max_j_pair = (u, v)
+            
+    pen = cx['penalties']['balance']
+    print(f"Largest Matrix Term (J): {max_j_val:,.1f}")
+    print(f"Occurs between variables : {max_j_pair[0]}  AND  {max_j_pair[1]}")
+    print("\nTHE EPIPHANY:")
+    print("In Radix encoding, the highest bits carry massive weight (e.g., 128 MW or 256 MW).")
+    print(f"When the power balance equation squares the sum, it multiplies those bits together:")
+    print(f" (Bit_A * Bit_B) * 2 * Penalty")
+    print(f" (256 MW * 256 MW) * 2 * {pen:.1f} = ~{256 * 256 * 2 * pen:,.0f}!")
+    print("\nCompare this to Unary encoding, where every bit is exactly 1.0 MW:")
+    print(f" (1.0 MW * 1.0 MW) * 2 * {pen:.1f} = ~{1 * 1 * 2 * pen:,.0f}")
+    print("This is why Unary encoding collapses the dynamic range.\n")
 
-    print("\n--- ROUND-TRIP CHECK: does 'unary' decode the IP optimum as accurately as 'radix'? ---")
-    for encoding in QuboFormulator.ENCODINGS:
-        f = QuboFormulator(formulation="dc_ptdf", mw_precision=1.0, encoding=encoding)
-        bqm, cx = f._formulate_qubo(net)
-        # Encode the IP-optimal dispatch onto this formulator's grid: round each dispatch value to
-        # the nearest reachable grid point and set the matching bits directly (radix: greedy from
-        # the largest weight down; unary: turn on that many precision-weighted bits).
-        sample = {v: 0 for v in bqm.variables}
-        for et in ("gen", "sgen", "ext_grid"):
-            tbl = getattr(net_ip, f"res_{et}")
-            for idx, reg in f.var_registry[et].items():
-                target = float(tbl.at[idx, "p_mw"]) - reg["min"]
-                for bit, w in sorted(zip(reg["bits"], reg["weights"]), key=lambda bw: -bw[1]):
-                    if w <= target + 1e-6:
-                        sample[bit] = 1
-                        target -= w
-        d, s, e, cost, feas = f._decode_solution(sample, net)
-        print(f" {encoding:<6}: cost={cost} EUR/h (IP: {round(ip_cost, 3)}) feasible={feas['is_feasible']} "
-              f"max_line_violation={feas['max_line_violation_mw']}")
+    # --- QUBO MATRIX VISUALIZATION ---
+    print("="*115)
+    print(" VISUAL QUBO MATRIX (dc_ptdf, radix, prec=10.0) ".center(115, "="))
+    print("="*115)
+    print("Diagonal = Linear biases (h). Upper Triangle = Quadratic interactions (J).")
+    print("Empty cells = 0.0 (No interaction). Values are rounded to nearest whole number.\n")
+
+    f_viz = QuboFormulator(formulation="dc_ptdf", encoding="radix", mw_precision=10.0)
+    bqm_viz, _ = f_viz._formulate_qubo(net)
+
+    # Abbreviate names so the Pandas table fits on screen
+    def short_name(name):
+        name = name.replace("gen_", "g")
+        name = name.replace("ext_", "e")
+        name = name.replace("slack_line_", "sl")
+        name = name.replace("_bit_", "_b")
+        return name
+
+    variables = list(bqm_viz.variables)
+    variables.sort() # Sorts alphabetically (ext, gen, slack) for grouped viewing
+    
+    short_vars = [short_name(v) for v in variables]
+    matrix = pd.DataFrame(index=short_vars, columns=short_vars)
+    matrix = matrix.fillna("") # Fill with empty strings for visual sparsity
+
+    for i, v1 in enumerate(variables):
+        # Linear terms go on the diagonal
+        val_lin = bqm_viz.linear.get(v1, 0.0)
+        if abs(val_lin) > 1e-3:
+            matrix.iloc[i, i] = f"{val_lin:,.0f}"
+
+        # Quadratic terms go in the upper triangle
+        for j in range(i + 1, len(variables)):
+            v2 = variables[j]
+            val_quad = bqm_viz.quadratic.get((v1, v2), bqm_viz.quadratic.get((v2, v1), 0.0))
+            if abs(val_quad) > 1e-3:
+                matrix.iloc[i, j] = f"{val_quad:,.0f}"
+
+    # Force pandas to print the whole table without truncating columns
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.width', 2000)
+    
+    print(matrix)
+    print("="*115 + "\n")

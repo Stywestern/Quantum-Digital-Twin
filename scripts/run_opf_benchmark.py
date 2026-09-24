@@ -14,7 +14,7 @@ from tqdm import tqdm
 # Import solvers
 from solvers.classical_ip_solver import ClassicalIPSolver
 from solvers.simulated_annealing_solver import SimulatedAnnealingSolver
-from solvers.quantum_annealing_sim_solver import SimulatedQuantumAnnealingSolver
+from solvers.simulated_quantum_annealing_solver import SimulatedQuantumAnnealingSolver
 
 # Import my grids
 from homemade_grids.small_grids import create_case3_low_gen, create_case3_high_gen, create_case4_low_gen, create_case4_high_gen

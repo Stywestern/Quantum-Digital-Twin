@@ -4,14 +4,7 @@ import math
 import dimod
 import numpy as np
 
-try:
-    from solvers.base_solver import BaseSolver
-except ImportError:  # standalone run of this file (demo block at the bottom)
-    class BaseSolver:
-        def __init__(self, max_time=1800):
-            self.max_time = max_time
-
-class BaseQuboFormulator(BaseSolver):
+class QuboFormulator():
     """
     Translates Pandapower DC-OPF problems into pure QUBO/Ising models.
     Does not execute solvers. Designed to be inherited by SA, QA, and QAOA solvers.
@@ -32,43 +25,56 @@ class BaseQuboFormulator(BaseSolver):
         Classic B-theta model: dispatch bits + per-bus angle bits, one KCL per bus.
         With several ext_grids all their buses are pinned to 0 rad (PTDF does not do that).
 
-    Fair evaluation (identical for both formulations, see _decode_solution)
-    ----------------------------------------------------------------------
-    Whatever the QUBO encoding, a decoded dispatch is judged with the same physical yardstick:
-    balance and line flows are recomputed from the dispatch alone with PTDF, costs use the exact
-    cost function (exact piecewise-linear costs, not the quadratic fit used inside the QUBO), and
-    the reference ext_grid is set to (load - all other units), as a power flow would do, so the
-    reported operating point is balanced and its cost is comparable with the IP solution.
-    Compare costs to a reference only when `is_feasible` is True.
-
-    Discretisation summary
-    ----------------------
-    * Every bounded continuous variable x in [lo, hi] is x = lo + sum_k w_k * b_k with a
-      bounded-coefficient binary expansion whose weights sum to exactly (hi - lo).
-    * dc_theta only: bus angles get per-bus ranges and per-bus resolutions such that one angle step
-      moves a line flow by at most `mw_precision` MW.
-    * penalty_balance / penalty_line default to values derived from the cost scale (_resolve_penalties).
-    * Limitation: only lines are modelled as branches (no transformers / shunts yet); every in-service
-      bus must be connected to the reference bus through in-service lines, otherwise a ValueError is raised.
+    Bit encodings (how a single bounded variable x in [lo, hi] is written in binary; same physics,
+    different QUBO. Applies uniformly to every encoded variable: dispatch, dc_theta angles, and
+    line-limit slack bits, since they all go through `_register` -> `_get_weights`)
+    -----------------------------------------------------------------------------------------
+    "radix" (default): bounded-coefficient binary weights precision*{1,2,4,...,2^(K-1)} plus one
+        remainder weight (see `_get_radix_weights`). O(log2(range/precision)) bits per variable --
+        qubit-efficient, but has HAMMING CLIFFS: some adjacent grid steps require flipping many
+        bits at once (e.g. 0111 -> 1000), because the weight of the bit that must flip to cross
+        that boundary can be much larger than one grid step. A local-search or annealing move that
+        only flips one or two bits at a time can therefore fail to reach an adjacent, often better,
+        state, even though it is "next door" in value.
+    "unary": every bit has an EQUAL weight of `precision` (a "thermometer" code: value = lo +
+        precision * (number of 1-bits), independent of WHICH bits are 1), except the single
+        remainder bit needed to make the weights sum to exactly (hi - lo), matching the radix
+        encoding's exactness. O(range/precision) bits per variable -- one bit per reachable grid
+        state, hence "every possible state is a bit" -- but flipping ANY ONE bit always changes
+        the value by exactly one grid step (or the remainder step), by construction: there is no
+        Hamming cliff, ever, because there is nothing for the weight of an individual bit to be
+        large relative to. No extra validity constraint is needed (unlike a strict one-hot
+        encoding, which would need a penalty enforcing "exactly one bit set" and gains nothing
+        further for this purpose): every one of the 2^N bit combinations maps to a well-defined,
+        in-range value through its bit count, so `_decode_value`, `_add_polynomial_cost` and every
+        constraint builder below work on it completely unchanged.
+        The cost of removing Hamming cliffs this way is qubits: `mw_precision=1.0` on a 500 MW
+        generator is ~9 bits under "radix" and ~500 bits under "unary". This is a genuine, and
+        usually severe, qubit-count-vs-locality trade-off to characterize, not a strictly better
+        encoding -- see WP2's resource-vs-quality framing.
     """
 
     # Line ratings that are missing / absurdly large are treated as "unconstrained".
     UNCONSTRAINED_I_KA = 100.0
-    UNCONSTRAINED_MW = 5000.0
+    UNCONSTRAINED_MW = 1000.0
     # Dispatch upper bound used when an asset has no max_p_mw.
     DEFAULT_MAX_MW = 500.0
     # dc_theta: angle ranges are widened by this factor so penalised (slightly violating) states stay representable.
     ANGLE_HEADROOM = 1.1
 
     FORMULATIONS = ("dc_ptdf", "dc_theta")
+    ENCODINGS = ("radix", "unary")
     _DISPATCH_TYPES = ("gen", "sgen", "ext_grid")
     _BIT_PREFIX = {"gen": "gen", "sgen": "sgen", "ext_grid": "ext"}
 
-    def __init__(self, formulation="dc_ptdf", max_time=1800, mw_precision=1.0,
+    def __init__(self, formulation="dc_ptdf", encoding="radix", mw_precision=1.0,
                  angle_precision=None, penalty_balance=None, penalty_line=None,
                  penalty_safety=2.0, feasibility_tol_mw=None, rebalance_slack=True, **kwargs):
         """
         formulation         : "dc_ptdf" (default; "dc" is an alias) or "dc_theta".
+        encoding             : "radix" (default) or "unary" -- how every bounded variable is
+                              expanded into bits; see the class docstring for the Hamming-cliff /
+                              qubit-count trade-off between the two.
         angle_precision     : dc_theta only. None -> per bus mw_precision / (largest susceptance at that bus);
                               a float forces one uniform resolution (rad).
         penalty_balance/line: None -> derived from the cost scale: penalty_safety * max_marginal_cost / mw_precision.
@@ -76,7 +82,6 @@ class BaseQuboFormulator(BaseSolver):
         rebalance_slack     : True -> the reported operating point sets the reference ext_grid to
                               (load - all other units); the raw decoded value and imbalance are kept in `feasibility`.
         """
-        super().__init__(max_time=max_time) if hasattr(super(), '__init__') else None
 
         if formulation == "dc":
             formulation = "dc_ptdf"
@@ -84,8 +89,11 @@ class BaseQuboFormulator(BaseSolver):
             raise NotImplementedError("The AC formulation is not implemented.")
         if formulation not in self.FORMULATIONS:
             raise ValueError(f"formulation must be one of {self.FORMULATIONS} (or 'dc'), got {formulation!r}")
+        if encoding not in self.ENCODINGS:
+            raise ValueError(f"encoding must be one of {self.ENCODINGS}, got {encoding!r}")
 
         self.formulation = formulation
+        self.encoding = encoding
         self.mw_precision = mw_precision
         self.angle_precision = angle_precision
         self.penalty_balance = penalty_balance
@@ -133,6 +141,7 @@ class BaseQuboFormulator(BaseSolver):
         Bounded-coefficient binary weights whose sum is exactly `total_range` (in physical units).
         Weights are precision*{1,2,4,...,2^(K-1)} plus one remainder weight; all values in
         [0, total_range] are reachable with gaps smaller than `precision`, and nothing above total_range is.
+        O(log2(total_range/precision)) bits. See class docstring: HAS Hamming cliffs.
         """
         if total_range <= 1e-12:
             return []
@@ -142,8 +151,32 @@ class BaseQuboFormulator(BaseSolver):
         weights.append(total_range - (2 ** K - 1) * precision)
         return weights
 
+    def _get_unary_weights(self, total_range, precision):
+        """
+        Every weight equals `precision` (a thermometer/unary code: value = sum of set bits *
+        precision), except the last, which is the remainder needed to make the weights sum to
+        exactly `total_range` -- same exactness guarantee as `_get_radix_weights`, same O(1) grid
+        gap, but O(total_range/precision) bits instead of O(log2(...)). See class docstring: NO
+        Hamming cliffs, since every bit (but the last) carries the same weight, so flipping any one
+        of them always moves the value by exactly one grid step regardless of which bit it is.
+        """
+        if total_range <= 1e-12:
+            return []
+        n = max(1, int(math.floor(total_range / precision + 1e-9)))
+        weights = [precision] * n
+        remainder = total_range - n * precision
+        if remainder > 1e-12:
+            weights.append(remainder)
+        return weights
+
+    def _get_weights(self, total_range, precision):
+        """Dispatches to the weight scheme selected by `self.encoding` (see class docstring)."""
+        if self.encoding == "unary":
+            return self._get_unary_weights(total_range, precision)
+        return self._get_radix_weights(total_range, precision)
+
     def _register(self, group, key, prefix, lo, hi, precision):
-        weights = self._get_radix_weights(hi - lo, precision) if hi > lo else []
+        weights = self._get_weights(hi - lo, precision) if hi > lo else []
         bits = [f"{prefix}_bit_{k}" for k in range(len(weights))]
         self.var_registry[group][key] = {'min': lo, 'max': hi, 'precision': precision,
                                          'bits': bits, 'weights': weights}
@@ -447,7 +480,9 @@ class BaseQuboFormulator(BaseSolver):
     # ------------------------------------------------------------------ #
     @staticmethod
     def _add_polynomial_cost(bqm, reg, c0, c1, c2):
-        """Adds c2*P^2 + c1*P + c0 with P = p_min + sum_k w_k b_k."""
+        """Adds c2*P^2 + c1*P + c0 with P = p_min + sum_k w_k b_k. Works unchanged for either
+        encoding: it only assumes P is an affine function of the bits, which both radix and unary
+        weights satisfy by construction."""
         p_min, bits, weights = reg['min'], reg['bits'], reg['weights']
         bqm.offset += (c2 * p_min ** 2) + (c1 * p_min) + c0
         for k, bit in enumerate(bits):
@@ -572,8 +607,19 @@ class BaseQuboFormulator(BaseSolver):
         num_angle_qubits = sum(len(r['bits']) for r in R['bus'].values())
         n_monitored = sum(1 for ln in self._lines if ln['p_max'] > 0.0)
 
+        n_vars = len(bqm.variables)
+        max_possible_interactions = (n_vars * (n_vars - 1)) / 2
+        density = (bqm.num_interactions / max_possible_interactions) if max_possible_interactions > 0 else 0.0
+        
+        mags = [abs(v) for v in bqm.linear.values() if abs(v) > 1e-12] + \
+               [abs(v) for v in bqm.quadratic.values() if abs(v) > 1e-12]
+        max_mag = max(mags) if mags else 0.0
+        min_mag = min(mags) if mags else 0.0
+        dynamic_range = (max_mag / min_mag) if min_mag > 0 else 1.0
+
         complexity = {
             "formulation": self.formulation,
+            "encoding": self.encoding,
             "classical_domain_input": {
                 "continuous_variables": sum(len(R[et]) for et in self._DISPATCH_TYPES)
                                         + sum(1 for r in R['bus'].values() if r['bits']),
@@ -587,10 +633,18 @@ class BaseQuboFormulator(BaseSolver):
                 "qubits_used_for_angles": num_angle_qubits,
                 "qubits_wasted_on_slack": num_slack_qubits,
                 "num_interactions": bqm.num_interactions,
+                "density_percent": round(density * 100, 2),
                 "offset": float(bqm.offset),
+            },
+            "hardware_limits": {
+                "max_coefficient_magnitude": round(float(max_mag), 4),
+                "min_coefficient_magnitude": round(float(min_mag), 4),
+                "dynamic_range": round(float(dynamic_range), 2),
+                "dac_precision_warning": bool(dynamic_range > 256.0)
             },
             "penalties": {"balance": float(self.lambda_balance), "line": float(self.lambda_line)},
         }
+
         return bqm, complexity
 
     def _encoded_nodal_mismatch(self, sample, net, raw):
@@ -693,7 +747,7 @@ class BaseQuboFormulator(BaseSolver):
         print(f"   QUBO {self.formulation.upper()}-OPF: COMPLETE PROBLEM DEFINITION")
         print(line)
         print(f"Total Grid Demand (Load): {round(sum(self._load_mw.values()), 3)} MW")
-        print(f"MW precision: {self.mw_precision} MW | Reference bus: {self._ref_bus}\n")
+        print(f"MW precision: {self.mw_precision} MW | Encoding: {self.encoding} | Reference bus: {self._ref_bus}\n")
 
         labels = {'gen': 'Gen', 'sgen': 'SGen', 'ext_grid': 'Ext_Grid (Slack)'}
 
@@ -716,21 +770,21 @@ class BaseQuboFormulator(BaseSolver):
         print(" Reported cost = exact cost function of the physically balanced operating point.")
 
         # 2) variables ------------------------------------------------------
-        print("\n--- DECISION VARIABLES (binary encoding: value = min + sum_k w_k * bit_k) ---")
+        print(f"\n--- DECISION VARIABLES ({self.encoding} encoding: value = min + sum_k w_k * bit_k) ---")
         for et in self._DISPATCH_TYPES:
             for idx, reg in self.var_registry[et].items():
                 sym = self._variable_symbol(et, idx)
-                print(f" {sym:<10} in [{reg['min']}, {reg['max']}] MW | {len(reg['bits']):>2} bits | "
+                print(f" {sym:<10} in [{reg['min']}, {reg['max']}] MW | {len(reg['bits']):>4} bits | "
                       f"weights: {self._fmt_weights(reg['weights'])}")
         for bus, reg in self.var_registry['bus'].items():
             sym = self._variable_symbol('bus', bus)
             if reg['bits']:
-                print(f" {sym:<10} in [{reg['min']:.4f}, {reg['max']:.4f}] rad | {len(reg['bits']):>2} bits | "
+                print(f" {sym:<10} in [{reg['min']:.4f}, {reg['max']:.4f}] rad | {len(reg['bits']):>4} bits | "
                       f"step {reg['precision']:.3g} rad")
             else:
                 print(f" {sym:<10} fixed at 0 (slack reference or no lines)")
         for l_idx, reg in self.var_registry['slack_lines'].items():
-            print(f" s_line{l_idx:<4} in [0, {reg['max']:.4g}] MW | {len(reg['bits']):>2} bits | "
+            print(f" s_line{l_idx:<4} in [0, {reg['max']:.4g}] MW | {len(reg['bits']):>4} bits | "
                   f"(inequality slack, not a physical variable)")
         if ptdf:
             print(" (no angle variables: angles are recovered afterwards as theta = X @ injections)")
@@ -776,7 +830,7 @@ class BaseQuboFormulator(BaseSolver):
         print("\n--- PROBLEM SIZE ---")
         print(f" Classical: {c['continuous_variables']} continuous variables, "
               f"{c['equality_constraints']} equality and {c['inequality_constraints']} inequality constraints")
-        print(f" QUBO: {q['total_logical_qubits']} logical qubits "
+        print(f" QUBO ({self.encoding}): {q['total_logical_qubits']} logical qubits "
               f"(dispatch {q['qubits_used_for_dispatch']}, angles {q['qubits_used_for_angles']}, "
               f"line-limit slack {q['qubits_wasted_on_slack']}), "
               f"{q['num_interactions']} quadratic terms, constant offset {q['offset']:.6g}")
@@ -784,8 +838,6 @@ class BaseQuboFormulator(BaseSolver):
 
 
 if __name__ == "__main__":
-    # Demo on pandapower's case5: builds the QUBO, prints the full problem definition, solves it with SA
-    # (optional, needs `pip install dwave-neal`) and compares against pandapower's DC interior-point solution.
     import copy
     import warnings
 
@@ -795,40 +847,35 @@ if __name__ == "__main__":
     warnings.filterwarnings("ignore")
     net = pn.case5()
 
-    formulator = BaseQuboFormulator(formulation="dc_ptdf", mw_precision=1.0)
-    bqm, complexity = formulator.view_problem_definition(net)
+    net_ip = copy.deepcopy(net)
+    pp.rundcopp(net_ip)
+    ip_cost = float(net_ip.res_cost)
 
-    # size comparison of the two formulations
-    print("--- FORMULATION COMPARISON (same DC-OPF, different encoding) ---")
-    for name in BaseQuboFormulator.FORMULATIONS:
-        _, cx = BaseQuboFormulator(formulation=name, mw_precision=1.0)._formulate_qubo(net)
+    print("--- ENCODING COMPARISON (same DC-OPF, same optimum, different qubit count) ---")
+    for encoding in QuboFormulator.ENCODINGS:
+        f = QuboFormulator(formulation="dc_ptdf", mw_precision=1.0, encoding=encoding)
+        bqm, cx = f._formulate_qubo(net)
         q = cx["quantum_domain_qubo"]
-        print(f" {name:<9}: {q['total_logical_qubits']:>3} qubits, {q['num_interactions']:>5} quadratic terms, "
-              f"lambda={cx['penalties']['balance']:.4g}")
-    print()
+        print(f" {encoding:<6}: {q['total_logical_qubits']:>5} qubits "
+              f"(dispatch {q['qubits_used_for_dispatch']}, slack {q['qubits_wasted_on_slack']}), "
+              f"{q['num_interactions']:>6} quadratic terms")
 
-    try:
-        import neal
-    except ImportError:
-        print("Tip: `pip install dwave-neal` to also solve this QUBO with SA in the demo.")
-    else:
-        best = neal.SimulatedAnnealingSampler().sample(bqm, num_reads=200, num_sweeps=5000, seed=42).first
-        gen, sgen, ext, cost, feas = formulator._decode_solution(best.sample, net)
-
-        net_ip = copy.deepcopy(net)
-        net_ip.load["controllable"] = False
-        pp.rundcopp(net_ip)
-        ip_cost = float(net_ip.res_cost)
-
-        print("--- SA RESULT (best of 200 reads) ---")
-        print(f" QUBO energy   : {best.energy:.4f}")
-        print(f" Gen dispatch  : {gen}")
-        print(f" SGen dispatch : {sgen}")
-        print(f" Ext dispatch  : {ext}   (raw decoded: {feas['raw_slack_dispatch_mw']}, raw imbalance {feas['raw_imbalance_mw']} MW)")
-        print(f" Cost (exact)  : {cost} EUR/h   | IP reference: {round(ip_cost, 3)} EUR/h")
-        print(f" Feasible      : {feas['is_feasible']} (max line violation {feas['max_line_violation_mw']} MW, tol {feas['tolerance_mw']} MW)")
-        if feas["is_feasible"]:
-            print(f" Cost gap vs IP: {100.0 * (cost - ip_cost) / ip_cost:.3f} %")
-        else:
-            print(" Cost gap vs IP: n/a (infeasible solutions are not comparable)")
-        print(f" Line flows    : {feas['line_flows_mw']}")
+    print("\n--- ROUND-TRIP CHECK: does 'unary' decode the IP optimum as accurately as 'radix'? ---")
+    for encoding in QuboFormulator.ENCODINGS:
+        f = QuboFormulator(formulation="dc_ptdf", mw_precision=1.0, encoding=encoding)
+        bqm, cx = f._formulate_qubo(net)
+        # Encode the IP-optimal dispatch onto this formulator's grid: round each dispatch value to
+        # the nearest reachable grid point and set the matching bits directly (radix: greedy from
+        # the largest weight down; unary: turn on that many precision-weighted bits).
+        sample = {v: 0 for v in bqm.variables}
+        for et in ("gen", "sgen", "ext_grid"):
+            tbl = getattr(net_ip, f"res_{et}")
+            for idx, reg in f.var_registry[et].items():
+                target = float(tbl.at[idx, "p_mw"]) - reg["min"]
+                for bit, w in sorted(zip(reg["bits"], reg["weights"]), key=lambda bw: -bw[1]):
+                    if w <= target + 1e-6:
+                        sample[bit] = 1
+                        target -= w
+        d, s, e, cost, feas = f._decode_solution(sample, net)
+        print(f" {encoding:<6}: cost={cost} EUR/h (IP: {round(ip_cost, 3)}) feasible={feas['is_feasible']} "
+              f"max_line_violation={feas['max_line_violation_mw']}")

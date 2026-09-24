@@ -89,7 +89,106 @@ class ClassicalIPSolver():
                 print(f"  PPC_GenCost_{i}: {list(cost_row)}")
         print("="*80 + "\n")
 
-    def solve(self, net):
+    def solve_pf(self, net):
+        """Executes a pure deterministic Power Flow (no economic optimization)."""
+        start_time = time.time()
+        
+        try:
+            # 1. Execution
+            if self.formulation == "ac":
+                pp.runpp(net, verbose=False)
+                solver_name = "pandapower_ac_power_flow"
+            else:
+                pp.rundcpp(net, verbose=False)
+                solver_name = "pandapower_dc_power_flow"
+            
+            status = "Success"
+            cost = None  # Pure PF does not optimize cost
+            
+            # 2. Result Extraction
+            sgen_dispatch = {}
+            if self.formulation == "ac":
+                dispatch = net.res_gen[['p_mw', 'q_mvar']].round(3).to_dict(orient='index') if not net.res_gen.empty else {}
+                slack_dispatch = net.res_ext_grid[['p_mw', 'q_mvar']].round(3).to_dict(orient='index')
+                if hasattr(net, 'res_sgen') and not net.res_sgen.empty:
+                    sgen_dispatch = net.res_sgen[['p_mw', 'q_mvar']].round(3).to_dict(orient='index')
+                max_bus_voltage = round(net.res_bus['vm_pu'].max(), 3)
+                min_bus_voltage = round(net.res_bus['vm_pu'].min(), 3)
+            else:
+                dispatch = net.res_gen[['p_mw']].round(3).to_dict(orient='index') if not net.res_gen.empty else {}
+                slack_dispatch = net.res_ext_grid[['p_mw']].round(3).to_dict(orient='index')
+                if hasattr(net, 'res_sgen') and not net.res_sgen.empty:
+                    sgen_dispatch = net.res_sgen[['p_mw']].round(3).to_dict(orient='index')
+                max_bus_voltage = round(net.res_bus['vm_pu'].max(), 3) if 'vm_pu' in net.res_bus.columns else 1.0
+                min_bus_voltage = round(net.res_bus['vm_pu'].min(), 3) if 'vm_pu' in net.res_bus.columns else 1.0
+
+            max_line_loading = round(net.res_line['loading_percent'].max(), 3)
+            
+            # 3. Explicit Feasibility Construction
+            total_load = net.load.p_mw.sum() if not net.load.empty else 0.0
+            gen_total = net.res_gen.p_mw.sum() if not net.res_gen.empty else 0.0
+            sgen_total = net.res_sgen.p_mw.sum() if hasattr(net, 'res_sgen') and not net.res_sgen.empty else 0.0
+            ext_grid_total = net.res_ext_grid.p_mw.sum() if not net.res_ext_grid.empty else 0.0
+            total_generation = gen_total + sgen_total + ext_grid_total
+            
+            # PF might exceed line ratings, so we strictly flag it
+            lines_ok = bool(max_line_loading <= 100.0)
+
+            feasibility = {
+                "total_generation_mw": round(total_generation, 3),
+                "total_load_mw": round(total_load, 3),
+                "raw_imbalance_mw": 0.0 if self.formulation == "dc" else round(total_generation - total_load, 3),
+                "raw_slack_dispatch_mw": round(ext_grid_total, 3),
+                "cost_raw_dispatch_eur": cost,
+                "max_line_loading_percent": max_line_loading,
+                "tolerance_mw": 1e-4,
+                "balance_ok": True, # PF always balances generation via slack
+                "lines_ok": lines_ok, 
+                "bounds_ok": True,
+                "is_feasible": lines_ok, # PF fails feasibility if lines overload
+                "line_flows_mw": net.res_line['p_from_mw'].round(3).to_dict() if 'p_from_mw' in net.res_line else {},
+                "bus_angles_rad": np.deg2rad(net.res_bus['va_degree']).round(6).to_dict() if 'va_degree' in net.res_bus else {}
+            }
+
+        except pp.powerflow.LoadflowNotConverged:
+            status = "Failed to Converge"
+            cost = None
+            dispatch = {}
+            sgen_dispatch = {}
+            slack_dispatch = {}
+            max_line_loading = None
+            max_bus_voltage = None
+            min_bus_voltage = None
+            solver_name = f"pandapower_{self.formulation}_power_flow"
+            feasibility = { "is_feasible": False }
+
+        execution_time = round(time.time() - start_time, 4)
+
+        solution = {
+            "cost_eur_per_hr": cost,
+            "generator_dispatch_mw": dispatch,
+            "static_generator_dispatch_mw": sgen_dispatch,
+            "slack_dispatch_mw": slack_dispatch,
+            "grid_state": {
+                "max_line_loading_percent": max_line_loading,
+                "max_voltage_pu": max_bus_voltage,
+                "min_voltage_pu": min_bus_voltage,
+                "feasibility": feasibility
+            }
+        }
+
+        metadata = {
+            "status": status,
+            "solver_name": solver_name,
+            "execution_time_seconds": {"total": execution_time, "qpu_master": 0.0, "cpu_subproblem": execution_time},
+            "problem_complexity": self._calculate_complexity(net),
+            "algorithmic_metrics": {"framework": "standard_newton_raphson", "num_iterations": 1, "optimality_gap_percent": 0.0},
+            "hardware_metrics": {"qpu_target": "none", "logical_qubits": 0, "physical_qubits": 0, "max_chain_length": 0, "circuit_depth": 0}
+        }
+
+        return solution, metadata
+
+    def solve_opf(self, net):
         start_time = time.time()
         
         try:
