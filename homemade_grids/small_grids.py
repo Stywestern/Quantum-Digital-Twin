@@ -85,7 +85,7 @@ def case4_high_gen():
     b2 = pp.create_bus(net, vn_kv=230, min_vm_pu=0.9, max_vm_pu=1.1)
     b3 = pp.create_bus(net, vn_kv=230, min_vm_pu=0.9, max_vm_pu=1.1)
 
-    ext = pp.create_ext_grid(net, bus=b0, vm_pu=1.0, max_p_mw=100.0)
+    ext = pp.create_ext_grid(net, bus=b0, vm_pu=1.0, min_p_mw=0.0, max_p_mw=100.0)
     g1 = pp.create_gen(net, bus=b1, p_mw=0, min_p_mw=0.0, max_p_mw=80.0, controllable=True)
     g2 = pp.create_gen(net, bus=b2, p_mw=0, min_p_mw=0.0, max_p_mw=80.0, controllable=True)
     g3 = pp.create_gen(net, bus=b3, p_mw=0, min_p_mw=0.0, max_p_mw=80.0, controllable=True)

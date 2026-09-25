@@ -1,9 +1,3 @@
-import sys
-from pathlib import Path
-project_root = Path(__file__).resolve().parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 import time
 import copy
 import numpy as np
@@ -11,8 +5,8 @@ import neal
 from solvers.qubo_formulator import QuboFormulator
 
 class SimulatedAnnealingSolver(QuboFormulator):
-    def __init__(self, formulation="dc", num_reads=500, num_sweeps=1000, max_time=1800, 
-                 mw_precision=1.0, seed=None, **kwargs):
+    def __init__(self, formulation="dc", num_reads=500, num_sweeps=3000, max_time=1800, 
+                 mw_precision=10.0, seed=None, **kwargs):
         
         super().__init__(
             formulation=formulation, max_time=max_time, mw_precision=mw_precision, **kwargs)
@@ -120,38 +114,5 @@ class SimulatedAnnealingSolver(QuboFormulator):
                 "circuit_depth": 0
             }
         }
-        
-        return solution, metadata
-
-    def solve_pf(self, net):
-        """Executes a QUBO Power Flow by locking economic variables."""
-        net_pf = copy.deepcopy(net)
-        
-        # 1. Lock dispatchable assets to eliminate decision variables
-        for idx in net_pf.gen.index:
-            p = float(net_pf.gen.at[idx, 'p_mw']) if not np.isnan(net_pf.gen.at[idx, 'p_mw']) else 0.0
-            net_pf.gen.at[idx, 'min_p_mw'] = p
-            net_pf.gen.at[idx, 'max_p_mw'] = p
-            
-        for idx in net_pf.ext_grid.index:
-            if 'p_mw' in net_pf.ext_grid.columns and not np.isnan(net_pf.ext_grid.at[idx, 'p_mw']):
-                p = float(net_pf.ext_grid.at[idx, 'p_mw'])
-            else:
-                p = 0.0
-            net_pf.ext_grid.at[idx, 'min_p_mw'] = p
-            net_pf.ext_grid.at[idx, 'max_p_mw'] = p
-
-        # 2. Strip cost polynomials
-        net_pf.poly_cost = net_pf.poly_cost.iloc[0:0]
-        if hasattr(net_pf, 'pwl_cost'):
-            net_pf.pwl_cost = net_pf.pwl_cost.iloc[0:0]
-
-        # 3. Solve using the core QUBO workflow
-        solution, metadata = self.solve_opf(net_pf)
-        
-        # 4. Tweak outputs for PF context
-        solution["cost_eur_per_hr"] = None
-        metadata["solver_name"] = f"neal_simulated_annealing_pf_{self.formulation}"
-        metadata["algorithmic_metrics"]["framework"] = "pure_qubo_discretization_pf"
         
         return solution, metadata

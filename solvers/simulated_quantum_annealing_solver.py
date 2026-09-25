@@ -142,8 +142,8 @@ class SimulatedQuantumAnnealingSolver(QuboFormulator):
     """
 
     def __init__(self, formulation="dc_ptdf", num_reads=300, num_sweeps=1000, max_time=1800,
-                 mw_precision=1.0, trotter_slices=32, device=None, postprocess_greedy=True,
-                 embedding_seed=None, seed=None, **kwargs):
+                 mw_precision=10.0, trotter_slices=16, device=None, postprocess_greedy=True,
+                 embedding_seed=None, **kwargs):
         """
         device            : a DeviceProfile (default: a generic modern Pegasus-class Advantage
                             profile). Every hardware constant lives here, not as a free per-run
@@ -155,11 +155,6 @@ class SimulatedQuantumAnnealingSolver(QuboFormulator):
                             output should say explicitly which one it is using.
         embedding_seed    : seeds `minorminer.find_embedding` for a reproducible embedding across
                             calls (minorminer's search is otherwise stochastic).
-        seed              : seeds a numpy Generator that draws one independent per-read seed for
-                            each of the `num_reads` SQA calls -- see the extensive earlier notes in
-                            this conversation on why this loop (not a single batched, seeded call)
-                            is the reproducible-AND-diverse approach in the installed OpenJij
-                            version.
         Any BaseQuboFormulator kwarg (feasibility_tol_mw, penalty_balance, penalty_line, encoding,
         ...) can be passed through.
         """
@@ -173,7 +168,6 @@ class SimulatedQuantumAnnealingSolver(QuboFormulator):
         self.device = device or DeviceProfile()
         self.postprocess_greedy = postprocess_greedy and _HAVE_GREEDY
         self.embedding_seed = embedding_seed
-        self.seed = seed
 
         self.sampler = oj.SQASampler()
 
@@ -292,7 +286,6 @@ class SimulatedQuantumAnnealingSolver(QuboFormulator):
                 trotter=self.trotter_slices, 
                 num_sweeps=self.num_sweeps,
                 num_reads=self.num_reads, 
-                seed=self.seed
             )
             samp_time = time.time() - t2
 
@@ -429,45 +422,6 @@ class SimulatedQuantumAnnealingSolver(QuboFormulator):
         }
         return solution, metadata
 
-    def solve_pf(self, net):
-        """
-        Executes a QUBO Power Flow by locking economic variables to their current setpoints.
-        Used strictly to validate physical grid state (Kirchhoff's laws) devoid of economics.
-        """
-        import copy
-        net_pf = copy.deepcopy(net)
-        
-        # 1. Lock dispatchable assets to eliminate decision variables
-        for idx in net_pf.gen.index:
-            p = float(net_pf.gen.at[idx, 'p_mw']) if not np.isnan(net_pf.gen.at[idx, 'p_mw']) else 0.0
-            net_pf.gen.at[idx, 'min_p_mw'] = p
-            net_pf.gen.at[idx, 'max_p_mw'] = p
-            
-        for idx in net_pf.ext_grid.index:
-            if 'p_mw' in net_pf.ext_grid.columns and not np.isnan(net_pf.ext_grid.at[idx, 'p_mw']):
-                p = float(net_pf.ext_grid.at[idx, 'p_mw'])
-            else:
-                p = 0.0
-            net_pf.ext_grid.at[idx, 'min_p_mw'] = p
-            net_pf.ext_grid.at[idx, 'max_p_mw'] = p
-
-        # 2. Strip cost polynomials so the BQM energy is purely physical mismatch
-        net_pf.poly_cost = net_pf.poly_cost.iloc[0:0]
-        if hasattr(net_pf, 'pwl_cost'):
-            net_pf.pwl_cost = net_pf.pwl_cost.iloc[0:0]
-
-        # 3. Solve using the core SQA workflow
-        # (reference_cost is irrelevant for PF)
-        solution, metadata = self.solve_opf(net_pf, reference_cost_eur_per_hr=None)
-        
-        # 4. Tweak outputs for PF context
-        solution["cost_eur_per_hr"] = None
-        metadata["solver_name"] = f"openjij_sqa_pf_{self.formulation}"
-        metadata["algorithmic_metrics"]["framework"] = "hardware_aware_sqa_pf"
-        
-        return solution, metadata
-
-
 if __name__ == "__main__":
     import copy
     import warnings
@@ -487,8 +441,7 @@ if __name__ == "__main__":
     solver = SimulatedQuantumAnnealingSolver(
         formulation="dc_ptdf", mw_precision=1.0, feasibility_tol_mw=1.0,
         trotter_slices=16, num_reads=20, num_sweeps=500,
-        embedding_seed=42, seed=42,
-    )
+        embedding_seed=42)
     solution, metadata = solver.solve_opf(net, reference_cost_eur_per_hr=ip_cost)
 
     print("=== Hardware feasibility report (auto_scale + placeholder ICE check) ===")

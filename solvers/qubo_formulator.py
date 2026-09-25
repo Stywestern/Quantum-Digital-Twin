@@ -5,7 +5,6 @@ import dimod
 import numpy as np
 
 class QuboFormulator():
-
     # Line ratings that are missing / absurdly large are treated as "unconstrained".
     UNCONSTRAINED_I_KA = 100.0
     UNCONSTRAINED_MW = 1000.0
@@ -22,7 +21,7 @@ class QuboFormulator():
     def __init__(self, formulation="dc_ptdf", encoding="radix", mw_precision=1.0,
                  angle_precision=None, penalty_balance=None, penalty_line=None,
                  penalty_safety=1.2, feasibility_tol_mw=None, rebalance_slack=True, 
-                 ptdf_threshold=0.05, hybrid_chunk_size=10.0, **kwargs):
+                 ptdf_threshold=0.05, hybrid_chunk_size=50.0, **kwargs):
         """
         formulation         : "dc_ptdf" (default; "dc" is an alias) or "dc_theta".
         encoding             : "radix" (default) or "unary" -- how every bounded variable is
@@ -133,18 +132,27 @@ class QuboFormulator():
         self.iterative_delta = delta
 
     def _get_hybrid_weights(self, total_range, precision):
-        """Uses Unary for bulk capacity (e.g., 10 MW chunks) and Radix for fine precision."""
+        """Uses Unary for bulk capacity and a Radix bridge to prevent dead zones."""
         if total_range <= 1e-12:
             return []
+            
+        # If the total range is smaller than one chunk, just use standard Radix
+        if total_range <= self.hybrid_chunk_size:
+            return self._get_radix_weights(total_range, precision)
+            
+        # 1. The Radix part MUST be large enough to bridge the gap of one full chunk
+        radix_coverage = self.hybrid_chunk_size - precision
+        radix_weights = self._get_radix_weights(radix_coverage, precision)
         
-        # 1. Unary for the bulk
-        n_unary = int(math.floor(total_range / self.hybrid_chunk_size + 1e-9))
-        unary_weights = [self.hybrid_chunk_size] * n_unary
+        # 2. The remaining capacity is covered by Unary chunks
+        remainder = total_range - radix_coverage
+        n_full_chunks = int(remainder // self.hybrid_chunk_size)
+        leftover_chunk = remainder % self.hybrid_chunk_size
         
-        # 2. Radix for the fine precision remainder
-        remainder = total_range - (n_unary * self.hybrid_chunk_size)
-        radix_weights = self._get_radix_weights(remainder, precision)
-        
+        unary_weights = [self.hybrid_chunk_size] * n_full_chunks
+        if leftover_chunk > 1e-6:
+            unary_weights.append(leftover_chunk)
+            
         return unary_weights + radix_weights
 
     def _get_weights(self, total_range, precision):
@@ -307,6 +315,26 @@ class QuboFormulator():
 
         return f_bus, t_bus, b_mw_rad, p_max_mw
 
+    def _get_trafo_physics(self, net, trafo_idx):
+        trafo = net.trafo.loc[trafo_idx]
+        f_bus = int(trafo['hv_bus'])
+        t_bus = int(trafo['lv_bus'])
+        
+        sn_mva_trafo = trafo['sn_mva']
+        vk_percent = trafo['vk_percent']
+        parallel = self._val(trafo.get('parallel'), 1.0)
+        
+        # Susceptance (B) in MW/rad for a transformer
+        if vk_percent == 0:
+            b_mw_rad = 0.0
+        else:
+            b_mw_rad = (sn_mva_trafo * parallel * 100.0) / vk_percent
+
+        max_loading = self._val(trafo.get('max_loading_percent'), 100.0) / 100.0
+        p_max_mw = sn_mva_trafo * parallel * max_loading
+        
+        return f_bus, t_bus, b_mw_rad, p_max_mw
+
     def _prepare_network(self, net):
         # in-service buses
         self._active_buses = {int(b) for b in net.bus.index[net.bus.in_service.astype(bool)]}
@@ -319,16 +347,28 @@ class QuboFormulator():
                 if bus in self._active_buses:
                     self._load_mw[bus] = self._load_mw.get(bus, 0.0) + ld['p_mw'] * self._val(ld.get('scaling'), 1.0)
 
-        # active lines with physics (cached: used by encoding, constraints, decode, printing)
+        # active lines and transformers with physics
         self._lines = []
         self._max_b = {}
+        
+        # 1. Process Standard Lines
         for l_idx in net.line.index[net.line.in_service.astype(bool)]:
             f, t, b, p_max = self._get_line_physics(net, l_idx)
             if b == 0.0 or f not in self._active_buses or t not in self._active_buses:
                 continue
-            self._lines.append({'idx': int(l_idx), 'f': f, 't': t, 'b': b, 'p_max': p_max})
+            self._lines.append({'idx': f"line_{l_idx}", 'f': f, 't': t, 'b': b, 'p_max': p_max})
             for bus in (f, t):
                 self._max_b[bus] = max(self._max_b.get(bus, 0.0), abs(b))
+                
+        # 2. Process Transformers
+        if hasattr(net, 'trafo') and not net.trafo.empty:
+            for t_idx in net.trafo.index[net.trafo.in_service.astype(bool)]:
+                f, t, b, p_max = self._get_trafo_physics(net, t_idx)
+                if b == 0.0 or f not in self._active_buses or t not in self._active_buses:
+                    continue
+                self._lines.append({'idx': f"trafo_{t_idx}", 'f': f, 't': t, 'b': b, 'p_max': p_max})
+                for bus in (f, t):
+                    self._max_b[bus] = max(self._max_b.get(bus, 0.0), abs(b))
 
         self._build_cost_table(net)
         self._build_ptdf(net)
@@ -520,9 +560,12 @@ class QuboFormulator():
                 bj, wj = terms[j]
                 bqm.add_quadratic(bi, bj, penalty_weight * 2 * wi * wj)
 
-    def _add_line_limit_penalty(self, bqm, ln, terms, constant):
-        """|flow| <= p_max  <=>  p_max + flow - s = 0 with slack s in [0, 2 p_max]; `terms`/`constant` hold p_max + flow."""
-        self._register('slack_lines', ln['idx'], f"slack_line_{ln['idx']}", 0.0, 2.0 * ln['p_max'], self.mw_precision)
+    def _add_line_limit_penalty(self, bqm, ln, terms, constant, slack_upper_bound=None):
+        """|flow| <= p_max  <=>  p_max + flow - s = 0 with slack s in [0, slack_upper_bound]."""
+        if slack_upper_bound is None:
+            slack_upper_bound = 2.0 * ln['p_max']
+            
+        self._register('slack_lines', ln['idx'], f"slack_line_{ln['idx']}", 0.0, slack_upper_bound, self.mw_precision)
         slack = self.var_registry['slack_lines'][ln['idx']]
         for bit, w in zip(slack['bits'], slack['weights']):
             terms[bit] = terms.get(bit, 0.0) - w
@@ -544,14 +587,37 @@ class QuboFormulator():
             if ln['p_max'] <= 0.0:
                 continue
             h = self._H[ln['idx']]
+            
+            # 1. DOMAIN TRUNCATION: Calculate absolute worst-case physical flows
+            base_flow = -sum(h[self._bus_pos[b]] * ld for b, ld in self._load_mw.items())
+            max_possible_flow = base_flow
+            min_possible_flow = base_flow
+            
+            for et, idx, reg, bus in self._dispatch_assets(net):
+                c = h[self._bus_pos[bus]]
+                val1 = c * reg['min']
+                val2 = c * reg['max']
+                max_possible_flow += max(val1, val2)
+                min_possible_flow += min(val1, val2)
+                
+            # 2. PRUNE: If it is physically impossible to overload this line, drop the penalty entirely!
+            if max_possible_flow <= ln['p_max'] and min_possible_flow >= -ln['p_max']:
+                continue
+                
+            # 3. BOUND: Clamp the slack variable so it doesn't waste qubits on unreachable states
+            slack_upper_bound = ln['p_max'] + max_possible_flow
+            if slack_upper_bound > 2.0 * ln['p_max']:
+                slack_upper_bound = 2.0 * ln['p_max']
+
             terms = {}
-            const = ln['p_max'] - sum(h[self._bus_pos[b]] * ld for b, ld in self._load_mw.items())
+            const = ln['p_max'] + base_flow
             for et, idx, reg, bus in self._dispatch_assets(net):
                 c = h[self._bus_pos[bus]]
                 const += c * reg['min']
                 for bit, w in zip(reg['bits'], reg['weights']):
                     terms[bit] = terms.get(bit, 0.0) + c * w
-            self._add_line_limit_penalty(bqm, ln, terms, const)
+                    
+            self._add_line_limit_penalty(bqm, ln, terms, const, slack_upper_bound)
         return bqm
 
     # --- dc_theta constraints ---
@@ -569,7 +635,7 @@ class QuboFormulator():
         for et, idx, reg, bus in self._dispatch_assets(net):
             add(bus, reg, 1.0)
 
-        for ln in self._lines:                                    # flow f->t = B (theta_f - theta_t)
+        for ln in self._lines:                                  # flow f->t = B (theta_f - theta_t)
             f, t, b = ln['f'], ln['t'], ln['b']
             reg_f, reg_t = self.var_registry['bus'][f], self.var_registry['bus'][t]
             add(f, reg_f, -b); add(f, reg_t, +b)                  # leaves f
@@ -585,13 +651,25 @@ class QuboFormulator():
                 continue
             f, t, b = ln['f'], ln['t'], ln['b']
             reg_f, reg_t = self.var_registry['bus'][f], self.var_registry['bus'][t]
+            
+            # DOMAIN TRUNCATION for Theta
+            max_flow = abs(b) * (reg_f['max'] - reg_t['min'])
+            min_flow = -abs(b) * (reg_f['max'] - reg_t['min'])
+            
+            if max_flow <= ln['p_max'] and min_flow >= -ln['p_max']:
+                continue
+                
+            slack_upper_bound = ln['p_max'] + max_flow
+            if slack_upper_bound > 2.0 * ln['p_max']:
+                slack_upper_bound = 2.0 * ln['p_max']
+
             terms = {}
             constant = ln['p_max'] + b * reg_f['min'] - b * reg_t['min']
             for k, bit in enumerate(reg_f['bits']):
                 terms[bit] = terms.get(bit, 0.0) + b * reg_f['weights'][k]
             for k, bit in enumerate(reg_t['bits']):
                 terms[bit] = terms.get(bit, 0.0) - b * reg_t['weights'][k]
-            self._add_line_limit_penalty(bqm, ln, terms, constant)
+            self._add_line_limit_penalty(bqm, ln, terms, constant, slack_upper_bound)
         return bqm
 
     # ------------------------------------------------------------------ #

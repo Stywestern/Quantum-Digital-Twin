@@ -76,9 +76,9 @@
             "status": "Success",
             "solver_name": "pandapower_dc_interior_point",
             "execution_time_seconds": {
-                "total": 0.2641,
+                "total": 0.1798,
                 "qpu_master": 0.0,
-                "cpu_subproblem": 0.2641
+                "cpu_subproblem": 0.1798
             },
             "problem_complexity": {
                 "num_continuous_variables": 5,
@@ -88,77 +88,6 @@
             },
             "algorithmic_metrics": {
                 "framework": "standard_interior_point",
-                "num_iterations": 1,
-                "optimality_gap_percent": 0.0
-            },
-            "hardware_metrics": {
-                "qpu_target": "none",
-                "logical_qubits": 0,
-                "physical_qubits": 0,
-                "max_chain_length": 0,
-                "circuit_depth": 0
-            }
-        }
-    },
-    "pf_validation_results": {
-        "solution": {
-            "cost_eur_per_hr": null,
-            "generator_dispatch_mw": {
-                "0": {
-                    "p_mw": 100.0
-                }
-            },
-            "static_generator_dispatch_mw": {},
-            "slack_dispatch_mw": {
-                "0": {
-                    "p_mw": 20.0
-                }
-            },
-            "grid_state": {
-                "max_line_loading_percent": 92.041,
-                "max_voltage_pu": 1.0,
-                "min_voltage_pu": 1.0,
-                "feasibility": {
-                    "total_generation_mw": 120.0,
-                    "total_load_mw": 120.0,
-                    "raw_imbalance_mw": 0.0,
-                    "raw_slack_dispatch_mw": 20.0,
-                    "cost_raw_dispatch_eur": null,
-                    "max_line_loading_percent": 92.041,
-                    "tolerance_mw": 0.0001,
-                    "balance_ok": true,
-                    "lines_ok": true,
-                    "bounds_ok": true,
-                    "is_feasible": true,
-                    "line_flows_mw": {
-                        "0": -26.667,
-                        "1": 73.333,
-                        "2": 46.667
-                    },
-                    "bus_angles_rad": {
-                        "0": 0.0,
-                        "1": 0.005041,
-                        "2": -0.008822
-                    }
-                }
-            }
-        },
-        "metadata": {
-            "status": "Success",
-            "solver_name": "pandapower_dc_power_flow",
-            "execution_time_seconds": {
-                "total": 0.3204,
-                "qpu_master": 0.0,
-                "cpu_subproblem": 0.3204
-            },
-            "problem_complexity": {
-                "num_continuous_variables": 5,
-                "num_binary_variables": 0,
-                "num_equality_constraints": 3,
-                "num_inequality_constraints": 10
-            },
-            "algorithmic_metrics": {
-                "framework": "standard_newton_raphson",
                 "num_iterations": 1,
                 "optimality_gap_percent": 0.0
             },
