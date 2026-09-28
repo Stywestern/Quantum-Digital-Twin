@@ -14,7 +14,7 @@ from solvers.simulated_quantum_annealing.s1b_embedding import embedding_stats
 from solvers.simulated_quantum_annealing.s1_hardware import Hardware, Schedule
 from solvers.simulated_quantum_annealing.s2_mapping import IsingArrays, add_ice_noise, quantise, scale_to_hardware
 from solvers.simulated_quantum_annealing.s3_samplers import make_sampler
-
+from solvers.simulated_quantum_annealing.s5_postprocess import descend_sampleset, steepest_descent
 
 @dataclass
 class EmulationResult:
@@ -51,11 +51,21 @@ class EmulatedQPU:
     def sample(self, logical_bqm: dimod.BinaryQuadraticModel, embedding: dict,
                chain_strength: float | None = None, prefactor: float = 1.414,
                num_reads: int = 1000, reads_per_programming: int = 100,
-               chain_break_method: str = "majority", keep_target: bool = False) -> EmulationResult:
+               chain_break_method: str = "majority", keep_target: bool = False,
+               postprocess: str | None = "logical") -> EmulationResult:
         """
         reads_per_programming : the ICE noise realisation is redrawn every this many reads, mimicking
                                 re-programming of the device between batches.
+        postprocess : None (default) | "physical" | "logical" | "both". Greedy steepest descent.
+                      "physical": on the embedded problem, before chain resolution (what a server-side
+                                  postprocess would do; it also repairs many chain breaks, so
+                                  chain_break_fraction is measured AFTER the descent).
+                                  Uses the ideal submitted problem, not the hidden noisy one.
+                      "logical" : on the logical problem after chain resolution (client-side, like
+                                  dwave-greedy's SteepestDescentComposite).
         """
+        if postprocess not in (None, "physical", "logical", "both"):
+            raise ValueError("postprocess must be None, 'physical', 'logical' or 'both'")
         logical_spin = logical_bqm.change_vartype(dimod.SPIN, inplace=False)
         if chain_strength is None:
             chain_strength = float(uniform_torque_compensation(logical_spin, prefactor=prefactor))
@@ -78,6 +88,10 @@ class EmulatedQPU:
             done += r
         samples = np.vstack(batches)
 
+        flips_phys = flips_log = 0
+        if postprocess in ("physical", "both"):
+            samples, flips_phys = steepest_descent(ideal, samples)
+
         # energies are reported w.r.t. the IDEAL embedded model (what the user actually asked for)
         energies = embedded.energies((samples, ideal.labels))
         target = dimod.SampleSet.from_samples((samples, ideal.labels), energy=energies, vartype=dimod.SPIN)
@@ -86,19 +100,22 @@ class EmulatedQPU:
         method = self._chain_break_method(chain_break_method, logical_spin, embedding)
         logical = unembed_sampleset(target, embedding, logical_spin,
                                     chain_break_method=method, chain_break_fraction=True)
+        if postprocess in ("logical", "both"):
+            logical, flips_log = descend_sampleset(logical, logical_spin)
         logical = logical.change_vartype(dimod.BINARY, inplace=False)
 
         info = {"sampler": self.sampler_name, "dac_bits": self.dac_bits, "sigma_h": self.sigma_h,
                 "sigma_j": self.sigma_j, "num_reads": num_reads,
                 "reads_per_programming": reads_per_programming,
                 "chain_break_method": chain_break_method,
+                "postprocess": postprocess, "postprocess_flips": (flips_phys, flips_log),
                 "placeholder_schedule": self.schedule.is_placeholder}
         return EmulationResult(logical, chain_strength, factor, embedding_stats(embedding),
                                target if keep_target else None, info)
 
 
 # =========================================================================
-# Execution Block: End-to-End Self-Test
+# Execution Block: End-to-End Self-Test (With and Without Post-Processing)
 # =========================================================================
 if __name__ == "__main__":
     import pandapower.networks as nw
@@ -118,67 +135,66 @@ if __name__ == "__main__":
     if not net.ext_grid.empty:
         net.ext_grid['min_p_mw'] = 0.0
     
-    # Using 10.0 MW precision for a balanced test size
+    # Using 10.0 MW precision
     formulator = QuboFormulator(formulation="dc_ptdf", mw_precision=10.0)
     logical_bqm, _ = formulator._formulate_qubo(net)
     print(f"    -> Logical BQM: {len(logical_bqm.variables)} vars, {len(logical_bqm.quadratic)} edges.")
-    
-    if len(logical_bqm.variables) == 0:
-        print("[-] BQM is empty. Exiting.")
-        exit(1)
 
     # 2. Hardware & Minor-Embedding
     print("\n[2] Initializing Z4 Hardware and finding embedding...")
     hw = Hardware.ideal_zephyr(m=4, t=4)
-    # Fast single-seed minorminer test to save time
     emb_results = find_embeddings(logical_bqm, hw, methods=["minorminer"], seeds=[0], verbose=False)
     _, embedding = select_best(emb_results)
-    print(f"    -> Embedded into {sum(len(c) for c in embedding.values())} physical qubits.")
 
     # 3. Emulated QPU Execution
-    print("\n[3] Booting EmulatedQPU (SVMC sampler)...")
+    print("\n[3] Booting EmulatedQPU (SQA sampler)...")
     qpu = EmulatedQPU(
         hardware=hw,
-        sampler="svmc",
+        sampler="sqa",  # SQA leaves thermal noise, good candidate for steepest descent
+        sampler_kwargs={"trotter_slices": 16},
         dac_bits=5,
         ice_sigma_h=0.01,
-        ice_sigma_j=0.01,
-        use_extended_j=True
+        ice_sigma_j=0.01
     )
 
-    print("[4] Submitting problem to EmulatedQPU (20 reads)...")
-    # Using reads_per_programming=10 to test the ICE noise redraw logic
-    result = qpu.sample(
+    print("[4] Submitting problem: Run 1 (RAW, NO POST-PROCESSING)")
+    result_raw = qpu.sample(
         logical_bqm=logical_bqm,
         embedding=embedding,
-        num_reads=20,
-        reads_per_programming=10,
-        chain_break_method="majority"
+        num_reads=50,
+        reads_per_programming=25,
+        chain_break_method="majority",
+        postprocess=None
     )
 
-    # 4. Results
+    print("[4] Submitting problem: Run 2 (WITH STEEPEST DESCENT)")
+    # Resetting the RNG seed guarantees the ICE noise and SQA quantum path integral 
+    # execute identically. The only difference is the post-processing filter.
+    qpu.rng = np.random.default_rng(0) 
+    result_sds = qpu.sample(
+        logical_bqm=logical_bqm,
+        embedding=embedding,
+        num_reads=50,
+        reads_per_programming=25,
+        chain_break_method="majority",
+        postprocess="both"
+    )
+
+    # 4. Results Comparison
     print("\n[+] EmulatedQPU Execution Successful!")
-    print(f"    -> Hardware Scale Factor: {result.scale_factor:e}")
-    print(f"    -> Chain Strength Applied: {result.chain_strength:.2f}")
+    print("\n=== POST-PROCESSING COMPARISON ===")
     
-    sampleset = result.sampleset
-    best_energy = sampleset.first.energy
+    best_energy_raw = result_raw.sampleset.first.energy
+    best_energy_sds = result_sds.sampleset.first.energy
     
-    # Safely extract chain break fraction
-    cbf = 0.0
-    if hasattr(sampleset.record, 'chain_break_fraction'):
-        cbf = sampleset.record.chain_break_fraction[0]
-        
-    print(f"    -> Best Energy (Logical): {best_energy:.2f}")
-    print(f"    -> Chain Break Fraction (Best Sample): {cbf:.4f}")
-    print(f"    -> Total Unique Samples Found: {len(sampleset)}")
+    # Calculate Chain Break Fractions
+    cbf_raw = getattr(result_raw.sampleset.record, 'chain_break_fraction', [0.0])[0]
+    cbf_sds = getattr(result_sds.sampleset.record, 'chain_break_fraction', [0.0])[0]
     
-    # 5. Decoding validation
-    print("\n[5] Decoding back to Power Grid...")
-    best_sample_dict = dict(sampleset.first.sample)
-    dispatch, sgen, slack, cost, feasibility = formulator._decode_solution(best_sample_dict, net)
-    print(f"    -> Feasible: {feasibility['is_feasible']}")
-    if feasibility['is_feasible']:
-        print(f"    -> Cost: {cost:.2f} EUR/hr")
-    else:
-        print("    -> Grid State: Constraint violations present (expected due to quantization/noise).")
+    print(f"{'Metric':<25} | {'Raw (No SDS)':<15} | {'Steepest Descent':<15}")
+    print("-" * 60)
+    print(f"{'Best Energy (Logical)':<25} | {best_energy_raw:<15.2f} | {best_energy_sds:<15.2f}")
+    print(f"{'Chain Break Fraction':<25} | {cbf_raw:<15.4f} | {cbf_sds:<15.4f}")
+    
+    phys_flips, log_flips = result_sds.info["postprocess_flips"]
+    print(f"\n    -> Steepest Descent executed {phys_flips} physical flips and {log_flips} logical flips.")

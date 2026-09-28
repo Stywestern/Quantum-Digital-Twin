@@ -4,8 +4,15 @@ import numpy as np
 import neal
 from solvers.qubo_formulator import QuboFormulator
 
+import time
+import copy
+import numpy as np
+import neal
+from solvers.qubo_formulator import QuboFormulator
+from solvers.simulated_quantum_annealing.s5_postprocess import descend_sampleset # Add SDS
+
 class SimulatedAnnealingSolver(QuboFormulator):
-    def __init__(self, formulation="dc", num_reads=500, num_sweeps=3000, max_time=1800, 
+    def __init__(self, formulation="dc_ptdf", num_reads=500, num_sweeps=3000, max_time=1800, 
                  mw_precision=10.0, seed=None, **kwargs):
         
         super().__init__(
@@ -22,12 +29,12 @@ class SimulatedAnnealingSolver(QuboFormulator):
         bqm, complexity, sampler_stats = None, {}, {}
         
         try:
-            # 1. Formulation Phase (CPU) via BaseQuboFormulator
+            # 1. Formulation Phase
             t0 = time.time()
             bqm, complexity = self._formulate_qubo(net)
             form_time = time.time() - t0
             
-            # 2. Sampling Phase (Classical SA mimicking QPU API)
+            # 2. Sampling Phase
             t1 = time.time()
             response = self.sampler.sample(
                 bqm, 
@@ -35,21 +42,27 @@ class SimulatedAnnealingSolver(QuboFormulator):
                 num_sweeps=self.num_sweeps,
                 seed=self.seed
             )
+            
+            # Post-Process: Apply Greedy Steepest Descent
+            # This ensures SA isn't trapped in tiny thermal divots near the optimum
+            optimized_response, total_flips = descend_sampleset(response, bqm.change_vartype('SPIN', inplace=False))
+            optimized_response = optimized_response.change_vartype('BINARY', inplace=False)
             samp_time = time.time() - t1
             
-            energies = response.record.energy
+            energies = optimized_response.record.energy
             sampler_stats = {
                 "num_reads_requested": self.num_reads,
                 "num_sweeps_per_read": self.num_sweeps,
-                "unique_states_found": len(response.record),
+                "unique_states_found": len(optimized_response.record),
                 "energy_best": round(float(np.min(energies)), 2),
                 "energy_mean": round(float(np.mean(energies)), 2),
                 "energy_worst": round(float(np.max(energies)), 2),
-                "energy_std_dev": round(float(np.std(energies)), 2)
+                "energy_std_dev": round(float(np.std(energies)), 2),
+                "postprocess_logical_flips": total_flips
             }
     
-            # 3. Decoding Phase (CPU) via BaseQuboFormulator
-            best_sample = response.first.sample
+            # 3. Decoding Phase
+            best_sample = optimized_response.first.sample
             dispatch, sgen_dispatch, slack_dispatch, cost, feasibility = self._decode_solution(best_sample, net)
             
         except Exception as e:
@@ -59,7 +72,6 @@ class SimulatedAnnealingSolver(QuboFormulator):
 
         exec_time = round(time.time() - start_time, 4)
         
-        # Safely calculate max line loading percentage from the decoded flows
         max_load_pct = None
         if hasattr(self, '_lines') and self._lines:
             loadings = []
@@ -70,7 +82,14 @@ class SimulatedAnnealingSolver(QuboFormulator):
             if loadings:
                 max_load_pct = round(max(loadings), 3)
 
-        # 4. Final Solution and Metadata Assembly
+        # Ensure optimality gap explicitly flags when the solver cheated
+        optimality_gap = 0.0
+        if not feasibility.get("is_feasible", False):
+            status = "Success (Infeasible)"
+            # Negative gap implies it found a "cheating" state cheaper than the true constrained minimum
+            # But technically gap is undefined for infeasible states
+            optimality_gap = None 
+
         solution = {
             "cost_eur_per_hr": cost,
             "generator_dispatch_mw": dispatch,
@@ -78,8 +97,8 @@ class SimulatedAnnealingSolver(QuboFormulator):
             "slack_dispatch_mw": slack_dispatch,
             "grid_state": {
                 "max_line_loading_percent": max_load_pct,
-                "max_voltage_pu": 1.0 if self.formulation == "dc" else None,
-                "min_voltage_pu": 1.0 if self.formulation == "dc" else None,
+                "max_voltage_pu": 1.0 if self.formulation == "dc_ptdf" else None,
+                "min_voltage_pu": 1.0 if self.formulation == "dc_ptdf" else None,
                 "feasibility": feasibility
             }
         }
@@ -103,7 +122,7 @@ class SimulatedAnnealingSolver(QuboFormulator):
             "algorithmic_metrics": {
                 "framework": "pure_qubo_discretization",
                 "num_iterations": 1,
-                "optimality_gap_percent": 0.0,
+                "optimality_gap_percent": optimality_gap,
                 "sampler_stats": sampler_stats
             },
             "hardware_metrics": {

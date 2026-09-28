@@ -1,3 +1,11 @@
+import warnings
+import logging
+import os
+warnings.filterwarnings("ignore")
+os.environ["PYTHONWARNINGS"] = "ignore"
+logging.getLogger().setLevel(logging.ERROR)
+
+
 import itertools
 from tqdm import tqdm
 from scripts.pf_opf_annealing_benchmark import run_pipeline
@@ -10,11 +18,11 @@ if __name__ == "__main__":
     
     # 1. Define the Grids
     grid_generators = [
-        #case3_low_gen,
-        #case4_high_gen,
-        pn.case5,
-        pn.case9,
-        pn.case14
+        case3_low_gen,
+        case4_high_gen,
+        #pn.case5,
+        #pn.case9,
+        #pn.case14
     ]
     
     # 2. Define the parameter space (Dropped theta, added 5.0)
@@ -24,8 +32,7 @@ if __name__ == "__main__":
     
     # 3. Define the SQA Hyperparameters
     num_reads = 500
-    num_sweeps = 2000
-    trotter_slices = 16
+    num_sweeps = 5000
     
     total_runs = len(grid_generators) * len(formulations) * len(encodings) * len(precisions)
 
@@ -60,7 +67,7 @@ if __name__ == "__main__":
                 
                 try:
                     # Pass the hyperparameters to the pipeline
-                    run_pipeline(config, net, num_reads, num_sweeps, trotter_slices)
+                    run_pipeline(config, net, num_reads, num_sweeps)
                 except Exception as e:
                     # Use tqdm.write so error messages don't break the progress bar UI
                     tqdm.write(f"\n[!] RUN FAILED: Grid={grid_name}, Form={form}, Enc={enc}, Prec={prec}")

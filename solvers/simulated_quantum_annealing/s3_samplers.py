@@ -8,6 +8,8 @@ Both return an int8 array (num_reads, n) of +/-1 spins, columns ordered like Isi
                 rotor angle theta in [0, pi]; the schedule A(s), B(s) drives a Metropolis anneal
                 with  E = -A/2 sum sin(theta_i) + B/2 [sum h_i cos(theta_i) + sum J_ij cos(theta_i) cos(theta_j)].
                 Updates are vectorised over reads and over graph-colour classes.
+  SQASampler  : simulated quantum annealing (path-integral Monte Carlo, Trotter slices). Quantum
+                (tunnelling, quantum correlations) but not real-time dynamics. See its docstring.
 """
 from __future__ import annotations
 
@@ -86,71 +88,187 @@ class SVMCSampler:
         return np.where(np.cos(theta) > 0.0, 1, -1).T.astype(np.int8)
 
 
+class SQASampler:
+    """Simulated quantum annealing = path-integral Monte Carlo of the transverse-field Ising model
+    that the annealer implements:
+
+        H(s) = -(A(s)/2) sum_i sigma^x_i + (B(s)/2) [ sum_i h_i sigma^z_i + sum_ij J_ij sigma^z_i sigma^z_j ]
+
+    Suzuki-Trotter maps the quantum system at temperature T onto P coupled classical replicas
+    ("imaginary-time slices") of the problem, with an inter-slice ferromagnetic coupling
+        K = 0.5 * ln coth( A/(2 kT P) ),
+    and each slice weighted by exp(-(B/2) H_ising / (kT P)).  Spins fluctuate along the slices, which is
+    how tunnelling and quantum correlations enter (the SVMC rotor model has neither).
+
+    What this is:  a genuine quantum model (samples the quantum Boltzmann distribution at every point of
+                   the schedule, with the real A(s), B(s) and temperature); scales ~linearly in qubits.
+    What it is not: real-time Schrodinger/Lindblad dynamics. Monte Carlo sweeps are a stand-in for
+                   anneal time (num_sweeps is a calibration parameter), and there is no open-system
+                   decoherence/relaxation model beyond the thermal bath in the sampling.
+    Accuracy knob: Trotter error. Need P large enough that (B/2)/(kT P) is not >> 1 near freeze-out;
+                   test convergence by doubling trotter_slices on a small instance.
+    Returns slice 0 of each replica stack (no post-selection on the best slice).
+    Cost ~ num_sweeps * trotter_slices * n_qubits * num_reads.
+    """
+
+    def __init__(self, schedule: Schedule, temperature_mk: float = 12.0, num_sweeps: int = 300,
+                 trotter_slices: int = 32, global_moves: bool = True):
+        if trotter_slices % 2:
+            raise ValueError("trotter_slices must be even (slices are updated in a checkerboard)")
+        self.schedule, self.temperature_mk = schedule, temperature_mk
+        self.num_sweeps, self.P, self.global_moves = num_sweeps, trotter_slices, global_moves
+
+    def sample(self, ar: IsingArrays, num_reads: int, seed: int) -> np.ndarray:
+        rng = np.random.default_rng(seed)
+        n, R, P = len(ar.labels), num_reads, self.P
+        beta = 1.0 / (KB_OVER_H_GHZ_PER_K * self.temperature_mk * 1e-3)         # 1/GHz
+
+        Jm = sp.coo_matrix((np.r_[ar.J, ar.J], (np.r_[ar.rows, ar.cols], np.r_[ar.cols, ar.rows])),
+                           shape=(n, n)).tocsr().astype(np.float32)
+        g = nx.Graph()
+        g.add_nodes_from(range(n))
+        g.add_edges_from(zip(ar.rows.tolist(), ar.cols.tolist()))
+        colour = nx.greedy_color(g, strategy="largest_first")
+        groups = {}
+        for v, c in colour.items():
+            groups.setdefault(c, []).append(v)
+        blocks = [np.array(b) for b in groups.values()]
+        Jrows = [Jm[b] for b in blocks]
+        hb = [ar.h[b].astype(np.float32)[:, None, None] for b in blocks]
+
+        s = rng.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(n, P, R))   # (qubit, slice, read)
+        parities = [np.arange(p, P, 2) for p in (0, 1)]
+
+        for t in range(self.num_sweeps):
+            A, B = self.schedule.at((t + 0.5) / self.num_sweeps)
+            x = max(beta * 0.5 * A / P, 1e-9)
+            K = 0.5 * np.log(1.0 / np.tanh(x))          # inter-slice coupling (>0, ferromagnetic)
+            w = beta * 0.5 * B / P                       # weight of the problem energy per slice
+
+            # local single-spin flips; even then odd slices so simultaneously updated slices never neighbour
+            for ks in parities:
+                kp, kn = (ks - 1) % P, (ks + 1) % P
+                for b, Jb, h in zip(blocks, Jrows, hb):
+                    F = (Jb @ s[:, ks, :].reshape(n, -1)).reshape(len(b), len(ks), R) + h
+                    cur = s[b[:, None], ks[None, :]]
+                    nn = s[b[:, None], kp[None, :]] + s[b[:, None], kn[None, :]]
+                    dS = 2.0 * cur * (K * nn - w * F)    # change in Trotter action if this spin flips
+                    accept = rng.random(dS.shape, dtype=np.float32) < np.exp(-np.clip(dS, 0.0, 50.0))
+                    s[b[:, None], ks[None, :]] = np.where(accept, -cur, cur)
+
+            # global world-line flips (one qubit, all slices): inter-slice term unchanged
+            if self.global_moves:
+                for b, Jb, h in zip(blocks, Jrows, hb):
+                    F = (Jb @ s.reshape(n, -1)).reshape(len(b), P, R) + h
+                    cur = s[b]
+                    dS = (-2.0 * w * cur * F).sum(axis=1)                     # (|b|, R)
+                    accept = rng.random(dS.shape, dtype=np.float32) < np.exp(-np.clip(dS, 0.0, 50.0))
+                    s[b] = np.where(accept[:, None, :], -cur, cur)
+
+        return np.where(s[:, 0, :] > 0.0, 1, -1).T.astype(np.int8)
+
+
 def make_sampler(kind: str, schedule: Schedule, temperature_mk: float, **kw):
     if kind == "sa":
         return SAFreezeout(schedule, temperature_mk, **kw)
     if kind == "svmc":
         return SVMCSampler(schedule, temperature_mk, **kw)
-    raise ValueError(f"unknown sampler {kind!r}; use 'sa' or 'svmc'")
+    if kind == "sqa":
+        return SQASampler(schedule, temperature_mk, **kw)
+    raise ValueError(f"unknown sampler {kind!r}; use 'sa', 'svmc' or 'sqa'")
 
 
 # =========================================================================
-# Execution Block: Self-Test
+# Execution Block: Physics Engine Comparison on a Real Grid
 # =========================================================================
 if __name__ == "__main__":
+    import time
     import dimod
-    import numpy as np
+    
+    try:
+        from homemade_grids.small_grids import case3_low_gen
+        from solvers.qubo_formulator import QuboFormulator
+        from solvers.simulated_quantum_annealing.s1b_embedding import find_embeddings, select_best
+        from solvers.simulated_quantum_annealing.s1_hardware import Hardware
+        from solvers.simulated_quantum_annealing.s2_mapping import scale_to_hardware, quantise, add_ice_noise
+        from dwave.embedding import embed_bqm
+        from dwave.embedding.chain_strength import uniform_torque_compensation
+    except ImportError as e:
+        print(f"[-] Import error: {e}. Ensure script is run from project root.")
+        exit(1)
 
-    # Ensure these paths match your actual directory structure
-    from solvers.simulated_quantum_annealing.s1_hardware import Schedule
-    from solvers.simulated_quantum_annealing.s2_mapping import (
-        IsingArrays, scale_to_hardware, quantise, add_ice_noise
-    )
+    print("=== Testing All Sampler Backends on case3_low_gen ===")
 
-    print("=== Testing SVMC Sampler Pipeline ===")
+    # 1. Formulation
+    print("[1] Formulating Grid...")
+    net = case3_low_gen()
+    if not net.ext_grid.empty: 
+        net.ext_grid['min_p_mw'] = 0.0
+        
+    formulator = QuboFormulator(formulation="dc_ptdf", mw_precision=10.0)
+    logical_bqm, _ = formulator._formulate_qubo(net)
+    logical_spin = logical_bqm.change_vartype(dimod.SPIN, inplace=False)
+
+    # 2. Minor-Embedding
+    print("[2] Minor-Embedding to Z4...")
+    hw = Hardware.ideal_zephyr(m=4, t=4)
+    emb_results = find_embeddings(logical_spin, hw, methods=["minorminer"], seeds=[0], verbose=False)
+    _, embedding = select_best(emb_results)
     
-    # 1. Create a synthetic frustrated logical problem (triangle graph)
-    # Using dimod.SPIN directly to avoid the vartype conversion error
-    print("[1] Creating logical SPIN BQM...")
-    bqm = dimod.BinaryQuadraticModel(
-        {'v0': 0.1, 'v1': -0.2, 'v2': 0.0},
-        {('v0', 'v1'): 1.5, ('v1', 'v2'): 2.0, ('v0', 'v2'): 2.5},
-        0.0, dimod.SPIN
-    )
-    
-    # 2. Convert to IsingArrays
-    print("[2] Converting to IsingArrays...")
-    ar_logical = IsingArrays.from_bqm(bqm)
-    
-    # 3. Map to Analog Hardware (Scale, Quantize, ICE)
-    print("[3] Mapping to Analog Hardware (Z4 ranges, 5-bit DAC, 0.01 ICE)...")
-    h_range = (-4.0, 4.0)
-    j_range = (-1.0, 1.0)
-    
-    ar_scaled, scale_factor = scale_to_hardware(ar_logical, h_range, j_range)
-    ar_quantized = quantise(ar_scaled, h_range, j_range, bits=5)
-    
-    rng = np.random.default_rng(seed=42)
-    ar_physical = add_ice_noise(ar_quantized, sigma_h=0.01, sigma_j=0.01, rng=rng)
-    
-    # 4. Initialize SVMC Sampler
-    print("\n[4] Initializing SVMC Sampler...")
+    cs = uniform_torque_compensation(logical_spin)
+    embedded_bqm = embed_bqm(logical_spin, embedding, hw.graph, chain_strength=cs)
+    ar_ideal = IsingArrays.from_bqm(embedded_bqm)
+
+    # 3. Analog Hardware Mapping
+    print("[3] Mapping to Analog Hardware (5-bit DAC, 0.01 ICE)...")
+    ar_scaled, _ = scale_to_hardware(ar_ideal, hw.h_range, hw.extended_j_range)
+    ar_quant = quantise(ar_scaled, hw.h_range, hw.extended_j_range, bits=5)
+    rng = np.random.default_rng(42)
+    ar_physical = add_ice_noise(ar_quant, sigma_h=0.01, sigma_j=0.01, rng=rng)
+
+    # 4. Helper for Chain Breaks
+    def get_chain_break_fraction(samples, emb, labels):
+        pos = {v: i for i, v in enumerate(labels)}
+        total_chains = sum(1 for c in emb.values() if len(c) > 1)
+        if total_chains == 0: 
+            return 0.0
+            
+        broken_chains = np.zeros(samples.shape[0])
+        for chain in emb.values():
+            if len(chain) > 1:
+                idxs = [pos[q] for q in chain]
+                chain_spins = samples[:, idxs]
+                # A chain is broken if the sum of its (+1/-1) spins does not equal its length
+                is_broken = np.abs(chain_spins.sum(axis=1)) != len(chain)
+                broken_chains += is_broken
+                
+        return (broken_chains / total_chains).mean()
+
+    # 5. Shared Physics Parameters
     schedule = Schedule.placeholder()
-    temperature_mk = 15.0
-    num_sweeps = 500  # Number of simulation steps per read
-    num_reads = 10
+    temp_mk = 15.0  
+    num_reads = 100
+    num_sweeps = 1000
+
+    # 6. Execute and Benchmark Each Engine
+    print("\n" + "="*60)
+    print(f"{'Engine':<10} | {'Time (s)':<10} | {'Unique States':<15} | {'Chain Breaks (%)'}")
+    print("="*60)
     
-    svmc_sampler = SVMCSampler(
-        schedule=schedule, 
-        temperature_mk=temperature_mk, 
-        num_sweeps=num_sweeps
-    )
-    
-    # 5. Execute Sampling
-    print(f"[5] Executing SVMC for {num_reads} reads...")
-    samples = svmc_sampler.sample(ar_physical, num_reads=num_reads, seed=42)
-    
-    print("\n[+] SVMC Execution Successful!")
-    print(f"    -> Output Shape: {samples.shape} (reads, variables)")
-    print(f"    -> First Sample (Spins): {samples[0]}")
-    print(f"    -> Variable Order: {ar_physical.labels}")
+    for kind in ["sa", "svmc", "sqa"]:
+        kwargs = {"num_sweeps": num_sweeps}
+        if kind == "sqa":
+            kwargs["trotter_slices"] = 16  # High enough for accuracy, low enough for speed
+            
+        sampler = make_sampler(kind, schedule, temp_mk, **kwargs)
+
+        t0 = time.time()
+        samples = sampler.sample(ar_physical, num_reads=num_reads, seed=42)
+        t_exec = time.time() - t0
+
+        cbf = get_chain_break_fraction(samples, embedding, ar_physical.labels) * 100
+        unique_states = len(np.unique(samples, axis=0))
+
+        print(f"{kind.upper():<10} | {t_exec:<10.4f} | {unique_states:<15} | {cbf:.2f}%")
+        
+    print("="*60 + "\n")

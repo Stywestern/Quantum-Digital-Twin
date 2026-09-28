@@ -14,25 +14,27 @@ class QuboFormulator():
     ANGLE_HEADROOM = 1.1
 
     FORMULATIONS = ("dc_ptdf", "dc_theta")
-    ENCODINGS = ("radix", "unary", "hybrid", "iterative")
+    ENCODINGS = ("radix", "unary", "hybrid")
     _DISPATCH_TYPES = ("gen", "sgen", "ext_grid")
     _BIT_PREFIX = {"gen": "gen", "sgen": "sgen", "ext_grid": "ext"}
 
-    def __init__(self, formulation="dc_ptdf", encoding="radix", mw_precision=1.0,
-                 angle_precision=None, penalty_balance=None, penalty_line=None,
-                 penalty_safety=1.2, feasibility_tol_mw=None, rebalance_slack=True, 
-                 ptdf_threshold=0.05, hybrid_chunk_size=50.0, **kwargs):
+    def __init__(self, formulation="dc", mw_precision=1.0, 
+                 angle_precision=0.01, penalty_balance=None, penalty_line=None,
+                 encoding="radix", penalty_safety=1.1, ptdf_threshold=1e-4,
+                 hybrid_chunk_size=50.0, feasibility_tol_mw=None, rebalance_slack=True,
+                 scale_line_constraints=True, smart_slack_side=True,
+                 slack_precision_factor=1.0, decode_with_full_ptdf=True,
+                 ptdf_rel_threshold=None, ptdf_round_to=None, snap_weights=True,
+                 ext_fallback_mult=10.0, risk_noise_frac=0.02, **kwargs):
         """
         formulation         : "dc_ptdf" (default; "dc" is an alias) or "dc_theta".
-        encoding             : "radix" (default) or "unary" -- how every bounded variable is
-                              expanded into bits; see the class docstring for the Hamming-cliff /
-                              qubit-count trade-off between the two.
-        angle_precision     : dc_theta only. None -> per bus mw_precision / (largest susceptance at that bus);
-                              a float forces one uniform resolution (rad).
-        penalty_balance/line: None -> derived from the cost scale: penalty_safety * max_marginal_cost / mw_precision.
-        feasibility_tol_mw  : tolerance of the feasibility check (balance, line limits); None -> mw_precision.
-        rebalance_slack     : True -> the reported operating point sets the reference ext_grid to
-                              (load - all other units); the raw decoded value and imbalance are kept in `feasibility`.
+        encoding             : "radix", "unary", "hybrid"
+        angle_precision     : dc_theta only.
+        penalty_balance/line: None -> auto derived.
+        hybrid_chunk_size    : Size of unary chunks in hybrid encoding (MW).
+        scale_line_constraints: Divides line constraints by max PTDF to shrink dynamic range.
+        smart_slack_side     : Halves slack bit requirements by bounding strictly.
+        ptdf_rel_threshold   : Zero PTDF entries below rel * max|H_l| to sparsify the graph.
         """
 
         if formulation == "dc":
@@ -45,31 +47,38 @@ class QuboFormulator():
             raise ValueError(f"encoding must be one of {self.ENCODINGS}, got {encoding!r}")
 
         self.formulation = formulation
-        self.encoding = encoding
         self.mw_precision = mw_precision
         self.angle_precision = angle_precision
         self.penalty_balance = penalty_balance
         self.penalty_line = penalty_line
+        self.encoding = encoding
         self.penalty_safety = penalty_safety
-        self.feasibility_tol_mw = feasibility_tol_mw
-        self.rebalance_slack = rebalance_slack
         self.ptdf_threshold = ptdf_threshold
         self.hybrid_chunk_size = hybrid_chunk_size
+        self.feasibility_tol_mw = feasibility_tol_mw
+        self.rebalance_slack = rebalance_slack
+        
+        # New Scaled Parameters
+        self.scale_line_constraints = scale_line_constraints
+        self.smart_slack_side = smart_slack_side
+        self.slack_precision_factor = slack_precision_factor
+        self.decode_with_full_ptdf = decode_with_full_ptdf
+        self.ptdf_rel_threshold = ptdf_rel_threshold
+        self.ptdf_round_to = ptdf_round_to
+        self.snap_weights = snap_weights
+        self.ext_fallback_mult = ext_fallback_mult
+        self.risk_noise_frac = risk_noise_frac
 
         self.var_registry = {}
         self.cost_model_warnings = []
         self.lambda_balance = penalty_balance
         self.lambda_line = penalty_line
 
-        self.iterative_bases = {}
-        self.iterative_delta = 0.0
-
     # ------------------------------------------------------------------ #
     # Small helpers
     # ------------------------------------------------------------------ #
     @staticmethod
     def _val(x, default):
-        """float(x), or `default` when x is None / NaN / not convertible (pandas returns NaN, not the .get default)."""
         try:
             if x is None or math.isnan(float(x)):
                 return default
@@ -90,16 +99,10 @@ class QuboFormulator():
         default_max = self._val(row.get('p_mw'), 0.0) if et == 'sgen' else self.DEFAULT_MAX_MW
         p_max = self._val(row.get('max_p_mw'), default_max)
         if p_max < p_min - 1e-9:
-            raise ValueError(f"{et} {idx}: max_p_mw ({p_max}) < min_p_mw ({p_min}); check the limits/sign convention.")
+            raise ValueError(f"{et} {idx}: max_p_mw ({p_max}) < min_p_mw ({p_min}); check the limits.")
         return p_min, p_max
 
     def _get_radix_weights(self, total_range, precision):
-        """
-        Bounded-coefficient binary weights whose sum is exactly `total_range` (in physical units).
-        Weights are precision*{1,2,4,...,2^(K-1)} plus one remainder weight; all values in
-        [0, total_range] are reachable with gaps smaller than `precision`, and nothing above total_range is.
-        O(log2(total_range/precision)) bits. See class docstring: HAS Hamming cliffs.
-        """
         if total_range <= 1e-12:
             return []
         n = max(1, int(math.floor(total_range / precision + 1e-9)))
@@ -109,14 +112,6 @@ class QuboFormulator():
         return weights
 
     def _get_unary_weights(self, total_range, precision):
-        """
-        Every weight equals `precision` (a thermometer/unary code: value = sum of set bits *
-        precision), except the last, which is the remainder needed to make the weights sum to
-        exactly `total_range` -- same exactness guarantee as `_get_radix_weights`, same O(1) grid
-        gap, but O(total_range/precision) bits instead of O(log2(...)). See class docstring: NO
-        Hamming cliffs, since every bit (but the last) carries the same weight, so flipping any one
-        of them always moves the value by exactly one grid step regardless of which bit it is.
-        """
         if total_range <= 1e-12:
             return []
         n = max(1, int(math.floor(total_range / precision + 1e-9)))
@@ -126,25 +121,15 @@ class QuboFormulator():
             weights.append(remainder)
         return weights
 
-    def set_iterative_state(self, bases: dict, delta: float):
-        """Used by the Iterative Solver to update the search center and radius."""
-        self.iterative_bases = bases
-        self.iterative_delta = delta
-
     def _get_hybrid_weights(self, total_range, precision):
-        """Uses Unary for bulk capacity and a Radix bridge to prevent dead zones."""
         if total_range <= 1e-12:
             return []
-            
-        # If the total range is smaller than one chunk, just use standard Radix
         if total_range <= self.hybrid_chunk_size:
             return self._get_radix_weights(total_range, precision)
             
-        # 1. The Radix part MUST be large enough to bridge the gap of one full chunk
         radix_coverage = self.hybrid_chunk_size - precision
         radix_weights = self._get_radix_weights(radix_coverage, precision)
         
-        # 2. The remaining capacity is covered by Unary chunks
         remainder = total_range - radix_coverage
         n_full_chunks = int(remainder // self.hybrid_chunk_size)
         leftover_chunk = remainder % self.hybrid_chunk_size
@@ -156,26 +141,31 @@ class QuboFormulator():
         return unary_weights + radix_weights
 
     def _get_weights(self, total_range, precision):
-        """Dispatches to the weight scheme selected by `self.encoding`."""
-        if self.encoding == "unary":
-            return self._get_unary_weights(total_range, precision)
-        if self.encoding == "hybrid":
-            return self._get_hybrid_weights(total_range, precision)
+        if total_range <= 0:
+            return []
+            
+        weights = []
         if self.encoding == "radix":
-            return self._get_radix_weights(total_range, precision)
+            weights = self._get_radix_weights(total_range, precision)
+        elif self.encoding == "unary":
+            weights = self._get_unary_weights(total_range, precision)
+        elif self.encoding == "hybrid":
+            weights = self._get_hybrid_weights(total_range, precision)
+                
+        # Apply weight snapping
+        if not self.snap_weights or not precision or precision <= 0:
+            return weights
+            
+        snapped = []
+        for x in weights:
+            k = math.floor(x / precision + 1e-9)
+            if k > 0:
+                snapped.append(k * precision)
+        return snapped if snapped else weights
 
     def _register(self, group, key, prefix, abs_lo, abs_hi, precision):
-        if self.encoding == "iterative":
-            # 1. Find the current base value (default to midpoint)
-            base = self.iterative_bases.get(group, {}).get(key, (abs_lo + abs_hi) / 2.0)
-            # 2. Define local step bounds, clamped by physical absolute bounds
-            lo = max(abs_lo, base - self.iterative_delta)
-            hi = min(abs_hi, base + self.iterative_delta)
-            # 3. Create exactly 1 bit representing the step from lo to hi
-            weights = [hi - lo] if hi > lo else []
-        else:
-            lo, hi = abs_lo, abs_hi
-            weights = self._get_weights(hi - lo, precision) if hi > lo else []
+        lo, hi = abs_lo, abs_hi
+        weights = self._get_weights(hi - lo, precision) if hi > lo else []
             
         bits = [f"{prefix}_bit_{k}" for k in range(len(weights))]
         self.var_registry[group][key] = {
@@ -188,18 +178,16 @@ class QuboFormulator():
         return reg['min'] + sum(w for bit, w in zip(reg['bits'], reg['weights']) if sample.get(bit, 0) == 1)
 
     def _dispatch_assets(self, net):
-        """Yields (et, idx, reg, bus) for every encoded dispatch asset."""
         for et in self._DISPATCH_TYPES:
             tbl = getattr(net, et)
             for idx, reg in self.var_registry[et].items():
                 yield et, idx, reg, int(tbl.at[idx, 'bus'])
 
     # ------------------------------------------------------------------ #
-    # Cost model (single source of truth for objective, decode and printing)
+    # Cost model
     # ------------------------------------------------------------------ #
     @staticmethod
     def _parse_pwl(segments, label):
-        """pandapower pwl_cost points are segments (p_from, p_to, slope_eur_per_mw)."""
         segs = []
         for seg in segments:
             if len(seg) != 3:
@@ -214,30 +202,24 @@ class QuboFormulator():
         total = np.zeros_like(p)
         for k, (a, b, slope) in enumerate(segs):
             if k == len(segs) - 1:
-                total += slope * np.maximum(p - a, 0.0)              # last slope extends upwards
+                total += slope * np.maximum(p - a, 0.0)
             else:
                 total += slope * np.clip(p - a, 0.0, b - a)
         return total
 
     def _fit_quadratic(self, segs, p_lo, p_hi, label):
-        """
-        A QUBO objective can only hold polynomial terms, so a PWL curve is replaced *inside the QUBO*
-        by its least-squares quadratic over the asset's dispatch range (exact for a single segment).
-        Reported costs still use the exact PWL (see _true_cost).
-        """
         if p_hi <= p_lo:
             return (float(self._pwl_eval(segs, [p_lo])[0]), 0.0, 0.0)
         xs = np.linspace(p_lo, p_hi, 201)
         ys = self._pwl_eval(segs, xs)
         c2, c1, c0 = np.polyfit(xs, ys, 2)
-        if c2 < 1e-12:                       # linear (or concave -> would reward extremes): use a line
+        if c2 < 1e-12:
             c1, c0 = np.polyfit(xs, ys, 1)
             c2 = 0.0
         err = float(np.max(np.abs(ys - (c2 * xs ** 2 + c1 * xs + c0))))
         if err > 1e-6 * max(1.0, float(np.max(np.abs(ys)))):
             self.cost_model_warnings.append(
-                f"pwl_cost of {label} approximated by a quadratic inside the QUBO (max abs error {err:.4g} EUR); "
-                f"reported costs use the exact PWL")
+                f"pwl_cost of {label} approximated by a quadratic inside the QUBO; reported costs use exact PWL")
         return (float(c0), float(c1), float(c2))
 
     def _build_cost_table(self, net):
@@ -258,9 +240,9 @@ class QuboFormulator():
             for _, row in net.pwl_cost.iterrows():
                 et, el = row['et'], int(row['element'])
                 if et not in table or el in table[et]:
-                    continue                                   # poly_cost wins over pwl_cost
+                    continue
                 if row.get('power_type', 'p') != 'p':
-                    continue                                   # reactive-power costs are not part of DC-OPF
+                    continue
                 if el not in getattr(net, et).index:
                     continue
                 p_lo, p_hi = self._asset_bounds(net, et, el)
@@ -271,14 +253,12 @@ class QuboFormulator():
         self._costs = table
 
     def _cost_coeffs(self, et, idx):
-        """(c0, c1, c2) used INSIDE the QUBO objective."""
         entry = self._costs[et].get(int(idx))
         if entry is not None:
             return entry['coeffs']
-        return (0.0, self._fallback_c1 * (10.0 if et == 'ext_grid' else 1.0), 0.0)
+        return (0.0, self._fallback_c1 * (getattr(self, 'ext_fallback_mult', 10.0) if et == 'ext_grid' else 1.0), 0.0)
 
     def _true_cost(self, et, idx, p):
-        """Exact cost of dispatching p MW (exact PWL when the net defines one)."""
         entry = self._costs[et].get(int(idx))
         if entry is not None and entry['pwl'] is not None:
             return float(self._pwl_eval(entry['pwl'], [p])[0])
@@ -304,7 +284,7 @@ class QuboFormulator():
         b_mw_rad = sn_mva / x_pu if x_pu != 0 else 0.0
 
         max_i_ka = self._val(line.get('max_i_ka'), None)
-        max_loading = self._val(line.get('max_loading_percent'), 100.0) / 100.0   # NaN-safe
+        max_loading = self._val(line.get('max_loading_percent'), 100.0) / 100.0
 
         if max_i_ka is None or max_i_ka > self.UNCONSTRAINED_I_KA:
             p_max_mw = 0.0
@@ -324,7 +304,6 @@ class QuboFormulator():
         vk_percent = trafo['vk_percent']
         parallel = self._val(trafo.get('parallel'), 1.0)
         
-        # Susceptance (B) in MW/rad for a transformer
         if vk_percent == 0:
             b_mw_rad = 0.0
         else:
@@ -336,10 +315,8 @@ class QuboFormulator():
         return f_bus, t_bus, b_mw_rad, p_max_mw
 
     def _prepare_network(self, net):
-        # in-service buses
         self._active_buses = {int(b) for b in net.bus.index[net.bus.in_service.astype(bool)]}
 
-        # in-service loads (with scaling), aggregated per bus
         self._load_mw = {}
         if not net.load.empty:
             for _, ld in net.load[net.load.in_service.astype(bool)].iterrows():
@@ -347,11 +324,9 @@ class QuboFormulator():
                 if bus in self._active_buses:
                     self._load_mw[bus] = self._load_mw.get(bus, 0.0) + ld['p_mw'] * self._val(ld.get('scaling'), 1.0)
 
-        # active lines and transformers with physics
         self._lines = []
         self._max_b = {}
         
-        # 1. Process Standard Lines
         for l_idx in net.line.index[net.line.in_service.astype(bool)]:
             f, t, b, p_max = self._get_line_physics(net, l_idx)
             if b == 0.0 or f not in self._active_buses or t not in self._active_buses:
@@ -360,7 +335,6 @@ class QuboFormulator():
             for bus in (f, t):
                 self._max_b[bus] = max(self._max_b.get(bus, 0.0), abs(b))
                 
-        # 2. Process Transformers
         if hasattr(net, 'trafo') and not net.trafo.empty:
             for t_idx in net.trafo.index[net.trafo.in_service.astype(bool)]:
                 f, t, b, p_max = self._get_trafo_physics(net, t_idx)
@@ -376,12 +350,6 @@ class QuboFormulator():
             self._angle_bounds = self._compute_angle_bounds(net)
 
     def _build_ptdf(self, net):
-        """
-        Reference bus, angle-sensitivity matrix X and PTDF rows H. Always built: dc_ptdf encodes the
-        problem with it, and both formulations use it as the common physical yardstick in the decoder.
-
-        theta = X @ injections (MW) with theta_ref = 0, flow_l = b_l * (theta_f - theta_t) = H[l] @ injections.
-        """
         ext = self._active(net, 'ext_grid')
         if not ext:
             raise ValueError("DC-OPF needs at least one in-service ext_grid as angle reference.")
@@ -407,8 +375,7 @@ class QuboFormulator():
         missing = sorted(set(buses) - seen)
         if missing:
             raise ValueError(
-                f"Buses {missing} are not connected to the reference bus {self._ref_bus} through in-service lines. "
-                f"Only lines are modelled as branches (transformers/other elements are not supported yet).")
+                f"Buses {missing} are not connected to the reference bus {self._ref_bus}. Only lines/trafos modelled.")
 
         Bm = np.zeros((n, n))
         for ln in self._lines:
@@ -423,24 +390,26 @@ class QuboFormulator():
             try:
                 X[np.ix_(keep, keep)] = np.linalg.inv(Bm[np.ix_(keep, keep)])
             except np.linalg.LinAlgError as exc:
-                raise ValueError("Reduced susceptance matrix is singular (check line reactances/topology).") from exc
+                try:
+                    X[np.ix_(keep, keep)] = np.linalg.pinv(Bm[np.ix_(keep, keep)])
+                except Exception:
+                    raise ValueError("Reduced susceptance matrix is singular.") from exc
         self._X = X
 
+        # Store full PTDF
+        self._H_full = {ln['idx']: ln['b'] * (X[pos[ln['f']]] - X[pos[ln['t']]]) for ln in self._lines}
         self._H = {}
+        
+        # Apply Sparsity Thresholding
         for ln in self._lines:
-            raw_h = ln['b'] * (X[pos[ln['f']]] - X[pos[ln['t']]])
-            # TRUNCATION: zero out weak sensitivities to enforce QPU sparsity
-            truncated_h = np.where(np.abs(raw_h) < self.ptdf_threshold, 0.0, raw_h)
-            self._H[ln['idx']] = truncated_h
+            raw = self._H_full[ln['idx']]
+            thr = max(self.ptdf_threshold, (self.ptdf_rel_threshold or 0.0) * float(np.max(np.abs(raw))))
+            h = np.where(np.abs(raw) < thr, 0.0, raw)
+            if self.ptdf_round_to:
+                h = np.round(h / self.ptdf_round_to) * self.ptdf_round_to
+            self._H[ln['idx']] = h
 
     def _compute_angle_bounds(self, net):
-        """
-        dc_theta only. Half-range d_i for bus angle theta_i in [-d_i, d_i] (slack buses fixed at 0).
-
-        |theta_i - theta_slack| <= sum over any path of |flow_l| / B_l, so d_i is the shortest path
-        (Dijkstra from the slack buses) with edge weight  flow_bound_l / B_l, where flow_bound_l is the
-        line rating if the line is monitored, otherwise the total load (a heuristic bound).
-        """
         slack = {int(net.ext_grid.at[i, 'bus']) for i in self._active(net, 'ext_grid')}
         total_load = max(sum(self._load_mw.values()), self.mw_precision)
         adj = {int(b): [] for b in net.bus.index}
@@ -465,7 +434,7 @@ class QuboFormulator():
         bounds = {}
         for b, neighbours in adj.items():
             if b in slack or not neighbours:
-                bounds[b] = 0.0                                   # reference, or angle irrelevant (no lines)
+                bounds[b] = 0.0
             else:
                 bounds[b] = dist[b] * self.ANGLE_HEADROOM
         return bounds
@@ -502,7 +471,6 @@ class QuboFormulator():
         bus_costs = {}
         marginals = []
         
-        # Track marginal costs per-bus
         for et, idx, reg, bus in self._dispatch_assets(net):
             _, c1, c2 = self._cost_coeffs(et, idx)
             c_val = abs(c1) + 2.0 * abs(c2) * reg['max']
@@ -513,13 +481,11 @@ class QuboFormulator():
         auto_bal = self.penalty_safety * c_max_global / self.mw_precision
         self.lambda_balance = self.penalty_balance if self.penalty_balance is not None else auto_bal
         
-        # Localize line penalties
         self.lambda_line = {}
         for ln in self._lines:
             if self.penalty_line is not None:
                 self.lambda_line[ln['idx']] = self.penalty_line
             else:
-                # Base penalty on the cost of the connected buses. If neither has generation, use 50% of global.
                 local_c = max(bus_costs.get(ln['f'], 0.0), bus_costs.get(ln['t'], 0.0))
                 if local_c < 1.0: 
                     local_c = c_max_global * 0.5 
@@ -530,9 +496,6 @@ class QuboFormulator():
     # ------------------------------------------------------------------ #
     @staticmethod
     def _add_polynomial_cost(bqm, reg, c0, c1, c2):
-        """Adds c2*P^2 + c1*P + c0 with P = p_min + sum_k w_k b_k. Works unchanged for either
-        encoding: it only assumes P is an affine function of the bits, which both radix and unary
-        weights satisfy by construction."""
         p_min, bits, weights = reg['min'], reg['bits'], reg['weights']
         bqm.offset += (c2 * p_min ** 2) + (c1 * p_min) + c0
         for k, bit in enumerate(bits):
@@ -543,13 +506,12 @@ class QuboFormulator():
 
     def _build_objective(self, bqm, net):
         for et in self._DISPATCH_TYPES:
-            for idx, reg in self.var_registry[et].items():       # registry only holds in-service assets
+            for idx, reg in self.var_registry[et].items(): 
                 c0, c1, c2 = self._cost_coeffs(et, idx)
                 self._add_polynomial_cost(bqm, reg, c0, c1, c2)
         return bqm
 
     def _add_squared_penalty(self, bqm, terms_dict, constant, penalty_weight):
-        """Adds penalty_weight * (constant + sum_i a_i x_i)^2."""
         terms = [(bit, w) for bit, w in terms_dict.items() if w != 0.0]
         bqm.offset += penalty_weight * (constant ** 2)
         for bit, w in terms:
@@ -561,7 +523,6 @@ class QuboFormulator():
                 bqm.add_quadratic(bi, bj, penalty_weight * 2 * wi * wj)
 
     def _add_line_limit_penalty(self, bqm, ln, terms, constant, slack_upper_bound=None):
-        """|flow| <= p_max  <=>  p_max + flow - s = 0 with slack s in [0, slack_upper_bound]."""
         if slack_upper_bound is None:
             slack_upper_bound = 2.0 * ln['p_max']
             
@@ -573,7 +534,6 @@ class QuboFormulator():
 
     # --- dc_ptdf constraints ---
     def _build_power_balance_ptdf(self, bqm, net):
-        """One global balance: sum of all dispatch - total load = 0 (the reference bus absorbs it in the physics)."""
         terms, const = {}, -sum(self._load_mw.values())
         for et, idx, reg, bus in self._dispatch_assets(net):
             const += reg['min']
@@ -583,46 +543,105 @@ class QuboFormulator():
         return bqm
 
     def _build_line_limits_ptdf(self, bqm, net):
+        if not getattr(self, 'scale_line_constraints', True):
+            # Fallback to unscaled logic if flag is False
+            for ln in self._lines:
+                if ln['p_max'] <= 0.0: continue
+                h = self._H[ln['idx']]
+                base_flow = -sum(h[self._bus_pos[b]] * ld for b, ld in self._load_mw.items())
+                max_possible_flow = base_flow
+                min_possible_flow = base_flow
+                for et, idx, reg, bus in self._dispatch_assets(net):
+                    c = h[self._bus_pos[bus]]
+                    val1, val2 = c * reg['min'], c * reg['max']
+                    max_possible_flow += max(val1, val2)
+                    min_possible_flow += min(val1, val2)
+                if max_possible_flow <= ln['p_max'] and min_possible_flow >= -ln['p_max']: continue
+                slack_upper_bound = ln['p_max'] + max_possible_flow
+                if slack_upper_bound > 2.0 * ln['p_max']: slack_upper_bound = 2.0 * ln['p_max']
+                terms, const = {}, ln['p_max'] + base_flow
+                for et, idx, reg, bus in self._dispatch_assets(net):
+                    c = h[self._bus_pos[bus]]
+                    const += c * reg['min']
+                    for bit, w in zip(reg['bits'], reg['weights']):
+                        terms[bit] = terms.get(bit, 0.0) + c * w
+                self._add_line_limit_penalty(bqm, ln, terms, const, slack_upper_bound)
+            return bqm
+
+        pos = self._bus_pos
+        assets = list(self._dispatch_assets(net))
+        slack_prec = self.mw_precision * getattr(self, 'slack_precision_factor', 1.0)
+
         for ln in self._lines:
-            if ln['p_max'] <= 0.0:
+            p_max = ln['p_max']
+            if p_max <= 0.0:
                 continue
             h = self._H[ln['idx']]
+            base_flow = -sum(h[pos[b]] * ld for b, ld in self._load_mw.items())
+            max_f = min_f = base_flow
+            coefs, marg = [], []
             
-            # 1. DOMAIN TRUNCATION: Calculate absolute worst-case physical flows
-            base_flow = -sum(h[self._bus_pos[b]] * ld for b, ld in self._load_mw.items())
-            max_possible_flow = base_flow
-            min_possible_flow = base_flow
-            
-            for et, idx, reg, bus in self._dispatch_assets(net):
-                c = h[self._bus_pos[bus]]
-                val1 = c * reg['min']
-                val2 = c * reg['max']
-                max_possible_flow += max(val1, val2)
-                min_possible_flow += min(val1, val2)
-                
-            # 2. PRUNE: If it is physically impossible to overload this line, drop the penalty entirely!
-            if max_possible_flow <= ln['p_max'] and min_possible_flow >= -ln['p_max']:
-                continue
-                
-            # 3. BOUND: Clamp the slack variable so it doesn't waste qubits on unreachable states
-            slack_upper_bound = ln['p_max'] + max_possible_flow
-            if slack_upper_bound > 2.0 * ln['p_max']:
-                slack_upper_bound = 2.0 * ln['p_max']
+            for et, idx, reg, bus in assets:
+                c = h[pos[bus]]
+                v1, v2 = c * reg['min'], c * reg['max']
+                max_f += max(v1, v2)
+                min_f += min(v1, v2)
+                if c != 0.0 and reg['bits']:
+                    coefs.append(abs(c))
+                    entry = self._costs[et].get(int(idx))
+                    if entry is not None:
+                        _, c1, c2 = entry['coeffs']
+                    else:
+                        c1 = self._fallback_c1 * (getattr(self, 'ext_fallback_mult', 10.0) if et == 'ext_grid' else 1.0)
+                        c2 = 0.0
+                    marg.append(abs(c1) + 2.0 * abs(c2) * reg['max'])
 
-            terms = {}
-            const = ln['p_max'] + base_flow
-            for et, idx, reg, bus in self._dispatch_assets(net):
-                c = h[self._bus_pos[bus]]
+            upper = max_f > p_max + 1e-9            
+            lower = min_f < -p_max - 1e-9           
+            if not (upper or lower):
+                continue                            
+            if not coefs:
+                self.cost_model_warnings.append(f"{ln['idx']}: limit can be violated but no variable moves it; skipped")
+                continue
+
+            if upper and lower or (lower and not upper):
+                sgn = 1.0
+                ub = 2.0 * p_max if (upper and lower) else p_max + max_f
+            else:
+                sgn = -1.0
+                ub = p_max - min_f
+                
+            if not getattr(self, 'smart_slack_side', True):
+                sgn, ub = 1.0, min(p_max + max_f, 2.0 * p_max)
+                
+            if ub <= 1e-9:
+                self.cost_model_warnings.append(f"{ln['idx']}: limit violated in every state; skipped")
+                continue
+
+            sigma = max(coefs)                       
+            lam = self.penalty_line if self.penalty_line is not None \
+                else self.penalty_safety * max(marg) / self.mw_precision
+            self.lambda_line[ln['idx']] = lam
+
+            terms, const = {}, p_max / sigma + sgn * base_flow / sigma
+            for et, idx, reg, bus in assets:
+                c = sgn * h[pos[bus]] / sigma
+                if c == 0.0:
+                    continue
                 const += c * reg['min']
                 for bit, w in zip(reg['bits'], reg['weights']):
                     terms[bit] = terms.get(bit, 0.0) + c * w
-                    
-            self._add_line_limit_penalty(bqm, ln, terms, const, slack_upper_bound)
+
+            self._register('slack_lines', ln['idx'], f"slack_line_{ln['idx']}", 0.0, ub / sigma, slack_prec)
+            slack = self.var_registry['slack_lines'][ln['idx']]
+            for bit, w in zip(slack['bits'], slack['weights']):
+                terms[bit] = terms.get(bit, 0.0) - w
+            self._add_squared_penalty(bqm, terms, const, lam)
+            
         return bqm
 
     # --- dc_theta constraints ---
     def _build_power_balance_theta(self, bqm, net):
-        """KCL at every in-service bus: gen + sgen + ext - load - sum(outgoing line flows) = 0."""
         terms = {b: {} for b in self._active_buses}
         const = {b: -self._load_mw.get(b, 0.0) for b in self._active_buses}
 
@@ -635,11 +654,11 @@ class QuboFormulator():
         for et, idx, reg, bus in self._dispatch_assets(net):
             add(bus, reg, 1.0)
 
-        for ln in self._lines:                                  # flow f->t = B (theta_f - theta_t)
+        for ln in self._lines:                                  
             f, t, b = ln['f'], ln['t'], ln['b']
             reg_f, reg_t = self.var_registry['bus'][f], self.var_registry['bus'][t]
-            add(f, reg_f, -b); add(f, reg_t, +b)                  # leaves f
-            add(t, reg_f, +b); add(t, reg_t, -b)                  # enters t
+            add(f, reg_f, -b); add(f, reg_t, +b)                  
+            add(t, reg_f, +b); add(t, reg_t, -b)                  
 
         for bus in sorted(self._active_buses):
             self._add_squared_penalty(bqm, terms[bus], const[bus], self.lambda_balance)
@@ -652,7 +671,6 @@ class QuboFormulator():
             f, t, b = ln['f'], ln['t'], ln['b']
             reg_f, reg_t = self.var_registry['bus'][f], self.var_registry['bus'][t]
             
-            # DOMAIN TRUNCATION for Theta
             max_flow = abs(b) * (reg_f['max'] - reg_t['min'])
             min_flow = -abs(b) * (reg_f['max'] - reg_t['min'])
             
@@ -675,6 +693,20 @@ class QuboFormulator():
     # ------------------------------------------------------------------ #
     # Formulation / decoding
     # ------------------------------------------------------------------ #
+    def _range_metrics(self, bqm):
+        import dimod
+        ising = bqm.change_vartype(dimod.SPIN, inplace=False)
+        mags = [abs(b) for b in ising.linear.values() if abs(b) > 1e-12]
+        mags += [abs(b) for _, _, b in ising.iter_quadratic() if abs(b) > 1e-12]
+        if not mags:
+            return {}
+        mx, mn = max(mags), min(mags)
+        frac = getattr(self, 'risk_noise_frac', 0.02)
+        risk = sum(1 for m in mags if m < frac * mx) / len(mags)
+        return {"ising_max": round(mx, 4), "ising_min": round(mn, 6),
+                "ising_dynamic_range": round(mx / mn, 2),
+                "ising_at_risk_percent": round(100 * risk, 2)}
+
     def _formulate_qubo(self, net):
         self._prepare_network(net)
         self._encode_variables(net)
@@ -724,22 +756,21 @@ class QuboFormulator():
                 "density_percent": round(density * 100, 2),
                 "offset": float(bqm.offset),
             },
-            "hardware_limits": {
-                "max_coefficient_magnitude": round(float(max_mag), 4),
-                "min_coefficient_magnitude": round(float(min_mag), 4),
-                "dynamic_range": round(float(dynamic_range), 2),
-                "dac_precision_warning": bool(dynamic_range > 256.0)
-            },
+            "hardware_limits": self._range_metrics(bqm),
             "penalties": {
                 "balance": float(self.lambda_balance), 
                 "line": self.lambda_line if isinstance(self.lambda_line, dict) else float(self.lambda_line)
             },
         }
 
+        # Override legacy limits with new accurate hardware limit data
+        complexity["hardware_limits"]["max_coefficient_magnitude"] = round(float(max_mag), 4)
+        complexity["hardware_limits"]["min_coefficient_magnitude"] = round(float(min_mag), 4)
+        complexity["hardware_limits"]["dac_precision_warning"] = bool(dynamic_range > 256.0)
+
         return bqm, complexity
 
     def _encoded_nodal_mismatch(self, sample, net, raw):
-        """dc_theta diagnostic: KCL residual of the *encoded* angle state (not used for feasibility)."""
         ang = {b: self._decode_value(reg, sample) for b, reg in self.var_registry['bus'].items()}
         mis = {b: 0.0 for b in self._active_buses}
         for et, idx, reg, bus in self._dispatch_assets(net):
@@ -753,63 +784,73 @@ class QuboFormulator():
         return max((abs(m) for m in mis.values()), default=0.0)
 
     def _decode_solution(self, sample, net):
-        R = self.var_registry
-        raw = {et: {idx: self._decode_value(reg, sample) for idx, reg in R[et].items()} for et in self._DISPATCH_TYPES}
-        pos = self._bus_pos
+        # Swap in the full, untruncated PTDF for honest physical evaluation
+        truncated = getattr(self, '_H', {})
+        if getattr(self, 'decode_with_full_ptdf', False) and hasattr(self, '_H_full'):
+            self._H = self._H_full
+            
+        try:
+            R = self.var_registry
+            raw = {et: {idx: self._decode_value(reg, sample) for idx, reg in R[et].items()} for et in self._DISPATCH_TYPES}
+            pos = self._bus_pos
 
-        # --- physical state of the decoded dispatch (independent of how the QUBO encoded the physics) ---
-        inj = np.zeros(len(pos))
-        bounds_ok = True
-        for et, idx, reg, bus in self._dispatch_assets(net):
-            val = raw[et][idx]
-            if val < reg['min'] - 1e-6 or val > reg['max'] + 1e-6:
-                bounds_ok = False
-            inj[pos[bus]] += val
-        for bus, load in self._load_mw.items():
-            inj[pos[bus]] -= load
-        imbalance = float(inj.sum())                              # total generation - total load (raw decode)
-        flows = {idx: float(h @ inj) for idx, h in self._H.items()}   # PTDF ignores the reference bus injection
-        angles = self._X @ inj
+            # --- physical state of the decoded dispatch ---
+            inj = np.zeros(len(pos))
+            bounds_ok = True
+            for et, idx, reg, bus in self._dispatch_assets(net):
+                val = raw[et][idx]
+                if val < reg['min'] - 1e-6 or val > reg['max'] + 1e-6:
+                    bounds_ok = False
+                inj[pos[bus]] += val
+            for bus, load in self._load_mw.items():
+                inj[pos[bus]] -= load
+            imbalance = float(inj.sum())                                      
+            flows = {idx: float(h @ inj) for idx, h in self._H.items()}   
+            angles = self._X @ inj
 
-        max_line_violation = max([abs(flows[ln['idx']]) - ln['p_max'] for ln in self._lines if ln['p_max'] > 0.0] + [0.0])
+            max_line_violation = max([abs(flows[ln['idx']]) - ln['p_max'] for ln in self._lines if ln['p_max'] > 0.0] + [0.0])
 
-        # --- operating point that is reported: reference ext_grid absorbs the imbalance, like a power flow ---
-        reported = {et: dict(v) for et, v in raw.items()}
-        raw_ref = raw['ext_grid'][self._ref_ext]
-        rebalance_ok = True
-        if self.rebalance_slack:
-            new_ref = raw_ref - imbalance
-            reported['ext_grid'][self._ref_ext] = new_ref
-            ref_reg = R['ext_grid'][self._ref_ext]
-            rebalance_ok = ref_reg['min'] - 1e-6 <= new_ref <= ref_reg['max'] + 1e-6
+            # --- operating point that is reported ---
+            reported = {et: dict(v) for et, v in raw.items()}
+            raw_ref = raw['ext_grid'][self._ref_ext]
+            rebalance_ok = True
+            if self.rebalance_slack:
+                new_ref = raw_ref - imbalance
+                reported['ext_grid'][self._ref_ext] = new_ref
+                ref_reg = R['ext_grid'][self._ref_ext]
+                rebalance_ok = ref_reg['min'] - 1e-6 <= new_ref <= ref_reg['max'] + 1e-6
 
-        tol = self.feasibility_tol_mw if self.feasibility_tol_mw is not None else self.mw_precision
-        balance_ok = abs(imbalance) <= tol
-        lines_ok = (max_line_violation <= tol)
+            tol = self.feasibility_tol_mw if self.feasibility_tol_mw is not None else self.mw_precision
+            balance_ok = abs(imbalance) <= tol
+            lines_ok = (max_line_violation <= tol)
 
-        cost = self._total_true_cost(reported)
-        feasibility = {
-            "total_generation_mw": round(float(sum(sum(v.values()) for v in reported.values())), 3),
-            "total_load_mw": round(float(sum(self._load_mw.values())), 3),
-            "raw_imbalance_mw": round(imbalance, 3),
-            "raw_slack_dispatch_mw": round(float(raw_ref), 3),
-            "cost_raw_dispatch_eur": round(self._total_true_cost(raw), 3),
-            "max_line_violation_mw": round(float(max_line_violation), 3),
-            "tolerance_mw": tol,
-            "balance_ok": bool(balance_ok),
-            "lines_ok": bool(lines_ok),
-            "bounds_ok": bool(bounds_ok and rebalance_ok),
-            "is_feasible": bool(balance_ok and lines_ok and bounds_ok and rebalance_ok),
-            "line_flows_mw": {k: round(v, 3) for k, v in flows.items()},
-            "bus_angles_rad": {b: round(float(angles[i]), 6) for b, i in pos.items()},
-        }
-        if self.formulation == "dc_theta":
-            feasibility["max_nodal_mismatch_mw"] = round(float(self._encoded_nodal_mismatch(sample, net, raw)), 3)
+            cost = self._total_true_cost(reported)
+            feasibility = {
+                "total_generation_mw": round(float(sum(sum(v.values()) for v in reported.values())), 3),
+                "total_load_mw": round(float(sum(self._load_mw.values())), 3),
+                "raw_imbalance_mw": round(imbalance, 3),
+                "raw_slack_dispatch_mw": round(float(raw_ref), 3),
+                "cost_raw_dispatch_eur": round(self._total_true_cost(raw), 3),
+                "max_line_violation_mw": round(float(max_line_violation), 3),
+                "tolerance_mw": tol,
+                "balance_ok": bool(balance_ok),
+                "lines_ok": bool(lines_ok),
+                "bounds_ok": bool(bounds_ok and rebalance_ok),
+                "is_feasible": bool(balance_ok and lines_ok and bounds_ok and rebalance_ok),
+                "line_flows_mw": {k: round(v, 3) for k, v in flows.items()},
+                "bus_angles_rad": {b: round(float(angles[i]), 6) for b, i in pos.items()},
+            }
+            if self.formulation == "dc_theta":
+                feasibility["max_nodal_mismatch_mw"] = round(float(self._encoded_nodal_mismatch(sample, net, raw)), 3)
 
-        dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['gen'].items()}
-        sgen_dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['sgen'].items()}
-        slack_dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['ext_grid'].items()}
-        return dispatch, sgen_dispatch, slack_dispatch, round(cost, 3), feasibility
+            dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['gen'].items()}
+            sgen_dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['sgen'].items()}
+            slack_dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['ext_grid'].items()}
+            
+            return dispatch, sgen_dispatch, slack_dispatch, round(cost, 3), feasibility
+            
+        finally:
+            self._H = truncated
 
     # ------------------------------------------------------------------ #
     # Reporting

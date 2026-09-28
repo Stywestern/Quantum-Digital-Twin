@@ -3,6 +3,7 @@
 ###############################################################################################################
 # Library imports
 import pandapower as pp
+import pandapower.networks as pn
 import copy
 import os
 import pandas as pd
@@ -11,12 +12,12 @@ import numpy as np
 
 # Module imports
 from homemade_grids.small_grids import case3_low_gen, case3_high_gen, case4_low_gen, case4_high_gen, extract_network_info
+
 from solvers.qubo_formulator import QuboFormulator
+
 from solvers.classical_ip_solver import ClassicalIPSolver
 from solvers.simulated_annealing_solver import SimulatedAnnealingSolver
-from solvers.simulated_quantum_annealing_solver import SimulatedQuantumAnnealingSolver
-
-from solvers.temp import SimulatedQuantumAnnealingSolver1
+from solvers.simulated_quantum_annealing.run_emulator import EmulatedQPUSolver
 
 class NumpyEncoder(json.JSONEncoder):
     """Safely converts numpy types to native Python types for JSON serialization."""
@@ -40,33 +41,33 @@ def print_execution_summary(payloads: dict, config: dict = None):
     print("\n" + "="*110)
     print(" PIPELINE EXECUTION SUMMARY ".center(110, "="))
     print("="*110)
-    
+
     rows_perf = []
     rows_res = []
-    
+
     for solver_name, payload in payloads.items():
-        opf_sol = payload.get("opf_results", {}).get("solution", {})
-        opf_meta = payload.get("opf_results", {}).get("metadata", {})
-        
+        opf_sol = payload.get("opf_results", {}).get("solution", {}) or {}
+        opf_meta = payload.get("opf_results", {}).get("metadata", {}) or {}
+
         # --- 1. Performance & Economics Table ---
-        opf_cost = opf_sol.get("cost_eur_per_hr") if opf_sol else None
-        
+        opf_cost = opf_sol.get("cost_eur_per_hr")
+
         slack_mw = None
-        if opf_sol and opf_sol.get("slack_dispatch_mw"):
-            slack_mw = sum(d.get("p_mw", 0) for d in opf_sol["slack_dispatch_mw"].values())
-            
+        if opf_sol.get("slack_dispatch_mw"):
+            slack_mw = sum(d.get("p_mw", 0.0) for d in opf_sol["slack_dispatch_mw"].values())
+
         pf_loading = None
-        if opf_sol and opf_sol.get("grid_state"):
+        if opf_sol.get("grid_state"):
             pf_loading = opf_sol["grid_state"].get("max_line_loading_percent")
-            
+
         exec_time = round(opf_meta.get("execution_time_seconds", {}).get("total", 0.0), 4)
-        
+
         rows_perf.append({
             "Solver": solver_name,
             "OPF Status": opf_meta.get("status", "Failed"),
-            "Cost (EUR/hr)": round(opf_cost, 2) if opf_cost is not None else "N/A",
-            "Slack (MW)": round(slack_mw, 2) if slack_mw is not None else "N/A",
-            "Max Load (%)": round(pf_loading, 2) if pf_loading is not None else "N/A",
+            "Cost (EUR/hr)": f"{opf_cost:.2f}" if opf_cost is not None else "N/A",
+            "Slack (MW)": f"{slack_mw:.2f}" if slack_mw is not None else "N/A",
+            "Max Load (%)": f"{pf_loading:.2f}" if pf_loading is not None else "N/A",
             "Time (s)": exec_time
         })
 
@@ -75,45 +76,57 @@ def print_execution_summary(payloads: dict, config: dict = None):
             comp = opf_meta.get("problem_complexity", {})
             hw = opf_meta.get("hardware_metrics", {})
             alg = opf_meta.get("algorithmic_metrics", {})
-            feas = opf_meta.get("hardware_feasibility_report", {})
             
+            # SQA puts this at root metadata, SA doesn't have it
+            feas = opf_meta.get("hardware_feasibility_report", {})
+
             form = comp.get("formulation", "N/A")
             enc = comp.get("encoding", "N/A")
             prec = config.get("mw_precision", "N/A") if config else "N/A"
-            
+
             q_domain = comp.get("quantum_domain_qubo", {})
             l_qub = q_domain.get("total_logical_qubits", "N/A")
             dens = q_domain.get("density_percent", "N/A")
-            dr = comp.get("hardware_limits", {}).get("dynamic_range", "N/A")
             
+            # HW limits might be directly under problem_complexity depending on the solver
+            hw_limits = comp.get("hardware_limits", {})
+            dr = hw_limits.get("dynamic_range", "N/A")
+
             p_qub = hw.get("physical_qubits", "N/A")
             max_chain = hw.get("max_chain_length", "N/A")
-            
-            # Formatting fractional metrics
-            cb_frac = alg.get("sampler_stats", {}).get("mean_chain_break_fraction")
-            cb = f"{round(cb_frac * 100, 3)}%" if cb_frac is not None else "N/A"
-            
+
+            # Safely format fractional metrics (handling 0.0 correctly)
+            sampler_stats = alg.get("sampler_stats", {})
+            cb_frac = sampler_stats.get("chain_break_fraction_mean")
+            cb = f"{cb_frac * 100:.3f}%" if cb_frac is not None else "N/A"
+
             risk_frac = feas.get("at_risk_fraction")
-            risk = f"{round(risk_frac * 100, 2)}%" if risk_frac is not None else "N/A"
+            risk = f"{risk_frac * 100:.2f}%" if risk_frac is not None else "N/A"
             
+            # Formatting density cleanly
+            dens_str = f"{dens}%" if isinstance(dens, (int, float)) else "N/A"
+            
+            # Formatting dynamic range cleanly
+            dr_str = f"{dr:,.1f}" if isinstance(dr, (int, float)) else "N/A"
+
             rows_res.append({
                 "Solver": solver_name,
-                "Formulation": form,
-                "Encoding": enc,
-                "Prec(MW)": prec,
+                "Form": form,
+                "Enc": enc,
+                "Prec": prec,
                 "L-Qubits": l_qub,
                 "P-Qubits": p_qub,
-                "Max Chain": max_chain,
-                "Density": f"{dens}%" if dens != "N/A" else dens,
-                "Dyn Range": dr,
+                "Max-Chain": max_chain,
+                "Density": dens_str,
+                "Dyn-Range": dr_str,
                 "At-Risk": risk,
-                "Chain Break": cb
+                "Chain-Break": cb
             })
 
     # Print First Table
     df_perf = pd.DataFrame(rows_perf)
     print(df_perf.to_string(index=False))
-    
+
     # Print Second Table
     print("\n" + "-"*110)
     print(" QUBO COMPLEXITY & HARDWARE METRICS ".center(110, "-"))
@@ -206,41 +219,52 @@ def run_pipeline(formulator_config, pristine_net, num_reads=500, num_sweeps=2000
     print(f"Step 4 (sa solver) Time: {round(time.time() - t_start, 4)} seconds")
 
     # ------------------------------------------------------------------------------------------------------------------------------------ #
-    # STEP 5: Hardware-Aware Simulated Quantum Annealing (SQA OPF)
+    # STEP 5: Hardware-Aware Analog Simulation (SA vs SVMC vs SQA)
     # ------------------------------------------------------------------------------------------------------------------------------------ #
     t_start = time.time()
     
-    sqa_solver = SimulatedQuantumAnnealingSolver1(
-        **formulator_config, 
-        num_reads=num_reads, 
-        num_sweeps=num_sweeps, 
-        trotter_slices=trotter_slices,        
-    )
-    
-    net_sqa_opf = copy.deepcopy(pristine_net)
-    
-    sqa_opf_solution, sqa_opf_metadata = sqa_solver.solve_opf(net_sqa_opf, reference_cost_eur_per_hr=ip_opf_cost)
-    
-    if sqa_opf_metadata["status"] != "Success":
-        print("[SQA OPF] Solver failed.")
+    analog_payloads = {}
+    samplers_to_test = ["sa", "svmc", "sqa"]
 
-    sqa_payload = {
-        "problem_parameters": original_problem_parameters,
-        "opf_results": {"solution": sqa_opf_solution, "metadata": sqa_opf_metadata}
-    }
-    
-    filename_sqa = os.path.join(output_dir, f"sqa_{form_type}_enc_{encoding_type}_prec_{prec}.json")
-    save_payload(sqa_payload, filename_sqa)
-    print(f"Step 5 (sqa solver) Time: {round(time.time() - t_start, 4)} seconds")
+    for sampler_type in samplers_to_test:
+        print(f"\n[+] Booting EmulatedQPU with backend: {sampler_type.upper()}")
+        emulator_solver = EmulatedQPUSolver(
+            **formulator_config, 
+            num_reads=num_reads, 
+            num_sweeps=num_sweeps,
+            sampler=sampler_type,
+            trotter_slices=trotter_slices
+        )
+
+        net_emu_opf = copy.deepcopy(pristine_net)
+        emu_opf_solution, emu_opf_metadata = emulator_solver.solve_opf(net_emu_opf)
+
+        if emu_opf_metadata["status"] != "Success":
+            print(f"[{sampler_type.upper()} OPF] Solver failed.")
+
+        payload = {
+            "problem_parameters": original_problem_parameters,
+            "opf_results": {"solution": emu_opf_solution, "metadata": emu_opf_metadata}
+        }
+
+        # Prepend 'sqa_' so the aggregation script groups all three under hardware-aware solvers
+        filename_emu = os.path.join(output_dir, f"sqa_{sampler_type}_{form_type}_enc_{encoding_type}_prec_{prec}.json")
+        save_payload(payload, filename_emu)
+        
+        analog_payloads[f"Emulated QPU ({sampler_type.upper()})"] = payload
+
+    print(f"\nStep 5 (Hardware Emulators) Time: {round(time.time() - t_start, 4)} seconds")
 
     # ------------------------------------------------------------------------------------------------------------------------------------ #
     # STEP X: Execution Summary
     # ------------------------------------------------------------------------------------------------------------------------------------ #
     all_payloads = {
         f"Classical IP ({ip_solver.formulation})": ground_truth_payload,
-        f"Simulated Annealing ({form_type})": discrete_payload,
-        f"Hardware-Aware SQA ({form_type})": sqa_payload
+        f"Classical SA ({form_type})": discrete_payload
     }
+    # Merge the three hardware emulators into the final output
+    all_payloads.update(analog_payloads)
+    
     print_execution_summary(all_payloads, formulator_config)
 
 ###############################################################################################################
@@ -258,4 +282,4 @@ if __name__ == "__main__":
     num_reads = 300
     num_sweeps = 5000
 
-    run_pipeline(default_config, case3_low_gen(), num_reads=num_reads, num_sweeps=num_sweeps)
+    run_pipeline(default_config, pn.case5(), num_reads=num_reads, num_sweeps=num_sweeps)
