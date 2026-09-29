@@ -19,13 +19,13 @@ class QuboFormulator():
     _BIT_PREFIX = {"gen": "gen", "sgen": "sgen", "ext_grid": "ext"}
 
     def __init__(self, formulation="dc", mw_precision=1.0, 
-                 angle_precision=0.01, penalty_balance=None, penalty_line=None,
-                 encoding="radix", penalty_safety=1.1, ptdf_threshold=1e-4,
-                 hybrid_chunk_size=50.0, feasibility_tol_mw=None, rebalance_slack=True,
+                 angle_precision=None, penalty_balance=None, penalty_line=None,
+                 encoding="radix", penalty_safety=1.0, ptdf_threshold=1e-4,
+                 hybrid_chunk_size=25.0, feasibility_tol_mw=None, rebalance_slack=True,
                  scale_line_constraints=True, smart_slack_side=True,
                  slack_precision_factor=1.0, decode_with_full_ptdf=True,
                  ptdf_rel_threshold=None, ptdf_round_to=None, snap_weights=True,
-                 ext_fallback_mult=10.0, risk_noise_frac=0.02, **kwargs):
+                 ext_fallback_mult=10.0, risk_noise_frac=0.03125, **kwargs):
         """
         formulation         : "dc_ptdf" (default; "dc" is an alias) or "dc_theta".
         encoding             : "radix", "unary", "hybrid"
@@ -978,130 +978,89 @@ class QuboFormulator():
         print(line + "\n")
 
 
+# =========================================================================
+# Execution Block: Deep Dive Coefficient Forensics (case5)
+# =========================================================================
 if __name__ == "__main__":
-    import copy
     import warnings
-    import itertools
+    import numpy as np
     import pandas as pd
-
-    import pandapower as pp
+    import dimod
     import pandapower.networks as pn
-    from homemade_grids.small_grids import case3_low_gen
-
+    
     warnings.filterwarnings("ignore")
-    net = case3_low_gen()
+    net = pn.case5() 
 
-    print("\n" + "="*115)
-    print(" QUBO CONSTANT EXPLORATION (case5) ".center(115, "="))
-    print("="*115)
+    print("\n" + "="*120)
+    print(" QUBO FORENSICS: THE WIDER STORY ".center(120, "="))
+    print("="*120)
     
-    rows = []
-    
-    # Iterate through all 8 combinations
-    combinations = itertools.product(
-        QuboFormulator.FORMULATIONS, 
-        QuboFormulator.ENCODINGS, 
-        [10.0, 1.0]
+    # Formulate using the optimized Hybrid configuration
+    f = QuboFormulator(
+        formulation="dc_ptdf", encoding="hybrid", mw_precision=10.0,
+        scale_line_constraints=True, smart_slack_side=True, ptdf_rel_threshold=0.05
     )
-    
-    for form, enc, prec in combinations:
-        f = QuboFormulator(formulation=form, encoding=enc, mw_precision=prec)
-        bqm, cx = f._formulate_qubo(net)
-        
-        # Extract constants
-        h_mags = [abs(v) for v in bqm.linear.values() if abs(v) > 1e-12]
-        j_mags = [abs(v) for v in bqm.quadratic.values() if abs(v) > 1e-12]
-        
-        max_h = max(h_mags) if h_mags else 0.0
-        max_j = max(j_mags) if j_mags else 0.0
-        
-        q = cx["quantum_domain_qubo"]
-        hw = cx["hardware_limits"]
-        pens = cx["penalties"]
-        
-        rows.append({
-            "Form": form,
-            "Enc": enc,
-            "Prec": prec,
-            "Qubits": q["total_logical_qubits"],
-            "Penalty (\u03BB)": round(pens["balance"], 1),
-            "Offset": round(bqm.offset, 1),
-            "Max Lin (h)": round(max_h, 1),
-            "Max Quad (J)": round(max_j, 1),
-            "Dyn Range": round(hw["dynamic_range"], 1)
-        })
-        
-    df = pd.DataFrame(rows)
-    print(df.to_string(index=False))
-    print("="*115 + "\n")
-    
-    # --- DEEP DIVE: The Epiphany ---
-    print("--- DEEP DIVE: WHY RADIX EXPLODES (dc_ptdf, radix, prec=1.0) ---")
-    f = QuboFormulator(formulation="dc_ptdf", encoding="radix", mw_precision=1.0)
     bqm, cx = f._formulate_qubo(net)
+    ising = bqm.change_vartype(dimod.SPIN, inplace=False)
+
+    # ---------------------------------------------------------
+    # 1. The PWL Artifact Check (Are generators outliers?)
+    # ---------------------------------------------------------
+    print("\n--- 1. GENERATOR COST POLYNOMIAL FIT CHECK ---")
+    print("Checking if massive quadratic terms are artifacts of PWL fitting.")
+    print(f"{'Asset':<15} | {'Max Capacity':<15} | {'Linear (c1)':<15} | {'Quadratic (c2)':<15}")
+    print("-" * 65)
     
-    # Find the single largest interaction in the matrix
-    max_j_val = 0
-    max_j_pair = None
-    for (u, v), val in bqm.quadratic.items():
-        if abs(val) > max_j_val:
-            max_j_val = abs(val)
-            max_j_pair = (u, v)
+    for et in ["gen", "sgen", "ext_grid"]:
+        for idx, reg in f.var_registry[et].items():
+            c0, c1, c2 = f._cost_coeffs(et, idx)
+            print(f"{et}_{idx:<11} | {reg['max']:<15.1f} | {c1:<15.4f} | {c2:<15.4f}")
+
+    # ---------------------------------------------------------
+    # 2. Granular Identity of the Minimums & Maximums
+    # ---------------------------------------------------------
+    print("\n--- 2. THE ISING MAGNITUDE IDENTITY (Who defines the boundaries?) ---")
+    
+    # Corrected unpacking: iter_quadratic() yields (u, v, val)
+    j_magnitudes = [(abs(val), u, v) for u, v, val in ising.iter_quadratic() if abs(val) > 1e-12]
+    j_magnitudes.sort(key=lambda x: x[0])  # Sort smallest to largest
+    
+    if j_magnitudes:
+        print("\n[ BOTTOM 5 SMALLEST INTERACTIONS (The Noise Floor Bottleneck) ]")
+        for val, u, v in j_magnitudes[:5]:
+            print(f"  {val:>10.2f}  -->  {u:<25} AND  {v}")
             
-    pen = cx['penalties']['balance']
-    print(f"Largest Matrix Term (J): {max_j_val:,.1f}")
-    print(f"Occurs between variables : {max_j_pair[0]}  AND  {max_j_pair[1]}")
-    print("\nTHE EPIPHANY:")
-    print("In Radix encoding, the highest bits carry massive weight (e.g., 128 MW or 256 MW).")
-    print(f"When the power balance equation squares the sum, it multiplies those bits together:")
-    print(f" (Bit_A * Bit_B) * 2 * Penalty")
-    print(f" (256 MW * 256 MW) * 2 * {pen:.1f} = ~{256 * 256 * 2 * pen:,.0f}!")
-    print("\nCompare this to Unary encoding, where every bit is exactly 1.0 MW:")
-    print(f" (1.0 MW * 1.0 MW) * 2 * {pen:.1f} = ~{1 * 1 * 2 * pen:,.0f}")
-    print("This is why Unary encoding collapses the dynamic range.\n")
-
-    # --- QUBO MATRIX VISUALIZATION ---
-    print("="*115)
-    print(" VISUAL QUBO MATRIX (dc_ptdf, radix, prec=10.0) ".center(115, "="))
-    print("="*115)
-    print("Diagonal = Linear biases (h). Upper Triangle = Quadratic interactions (J).")
-    print("Empty cells = 0.0 (No interaction). Values are rounded to nearest whole number.\n")
-
-    f_viz = QuboFormulator(formulation="dc_ptdf", encoding="radix", mw_precision=10.0)
-    bqm_viz, _ = f_viz._formulate_qubo(net)
-
-    # Abbreviate names so the Pandas table fits on screen
-    def short_name(name):
-        name = name.replace("gen_", "g")
-        name = name.replace("ext_", "e")
-        name = name.replace("slack_line_", "sl")
-        name = name.replace("_bit_", "_b")
-        return name
-
-    variables = list(bqm_viz.variables)
-    variables.sort() # Sorts alphabetically (ext, gen, slack) for grouped viewing
+        print("\n[ TOP 5 LARGEST INTERACTIONS (The Dynamic Range Ceiling) ]")
+        for val, u, v in j_magnitudes[-5:]:
+            print(f"  {val:>10.2f}  -->  {u:<25} AND  {v}")
+            
+    # ---------------------------------------------------------
+    # 3. Granular Group Splitting by Variable Prefix
+    # ---------------------------------------------------------
+    print("\n--- 3. DETAILED SPLIT BY VARIABLE GROUP ---")
     
-    short_vars = [short_name(v) for v in variables]
-    matrix = pd.DataFrame(index=short_vars, columns=short_vars)
-    matrix = matrix.fillna("") # Fill with empty strings for visual sparsity
+    def extract_base_name(var_name):
+        # Extracts 'gen_2' from 'gen_2_bit_0'
+        return var_name.split('_bit_')[0]
 
-    for i, v1 in enumerate(variables):
-        # Linear terms go on the diagonal
-        val_lin = bqm_viz.linear.get(v1, 0.0)
-        if abs(val_lin) > 1e-3:
-            matrix.iloc[i, i] = f"{val_lin:,.0f}"
-
-        # Quadratic terms go in the upper triangle
-        for j in range(i + 1, len(variables)):
-            v2 = variables[j]
-            val_quad = bqm_viz.quadratic.get((v1, v2), bqm_viz.quadratic.get((v2, v1), 0.0))
-            if abs(val_quad) > 1e-3:
-                matrix.iloc[i, j] = f"{val_quad:,.0f}"
-
-    # Force pandas to print the whole table without truncating columns
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.width', 2000)
+    granular_groups = {}
     
-    print(matrix)
-    print("="*115 + "\n")
+    # Corrected unpacking here as well
+    for u, v, val in ising.iter_quadratic():
+        if abs(val) > 1e-12:
+            base_u = extract_base_name(u)
+            base_v = extract_base_name(v)
+            # Create a sorted pair key (e.g., 'gen_0 - slack_line_1')
+            pair_key = " - ".join(sorted([base_u, base_v]))
+            granular_groups.setdefault(pair_key, []).append(abs(val))
+
+    print(f"{'Interaction Pair':<35} | {'Count':<6} | {'Min |J|':<12} | {'Median |J|':<12} | {'Max |J|':<12}")
+    print("-" * 85)
+    
+    # Sort by Max |J| descending
+    sorted_groups = sorted(granular_groups.items(), key=lambda kv: -max(kv[1]))
+    
+    for pair, vals in sorted_groups:
+        print(f"{pair:<35} | {len(vals):<6} | {min(vals):<12.2f} | {np.median(vals):<12.2f} | {max(vals):<12.2f}")
+    
+    print("\n" + "="*120 + "\n")

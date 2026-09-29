@@ -110,7 +110,7 @@ def aggregate_all_results():
         p_qub = hw.get("physical_qubits", np.nan)
         max_ch = hw.get("max_chain_length", np.nan)
         dens = q_domain.get("density_percent", np.nan)
-        dr = hw_limits.get("dynamic_range", np.nan)
+        dr = hw_limits.get("ising_dynamic_range", np.nan)
 
         # Chain break and risk stats
         sampler_stats = alg.get("sampler_stats", {})
@@ -123,8 +123,8 @@ def aggregate_all_results():
             "Solver": solver,
             "Form": form,
             "Enc": enc,
-            "Prec": float(prec) if prec is not None else np.nan,
-            "Cost (€)": cost if cost is not None else np.nan,
+            "Prec": float(prec) if prec is not None else 0,
+            "Cost (€)": cost if cost is not None else 0,
             "Opt-Gap (%)": opt_gap,
             "Feasible": is_feasible,
             "Slack (MW)": slack_mw,
@@ -134,8 +134,8 @@ def aggregate_all_results():
             "Max-Ch": max_ch,
             "Dens (%)": dens,
             "DynRng": dr,
-            "At-Risk (%)": risk_frac * 100 if pd.notna(risk_frac) else np.nan,
-            "CB (%)": cb_frac * 100 if pd.notna(cb_frac) else np.nan,
+            "At-Risk (%)": risk_frac * 100 if pd.notna(risk_frac) else 0,
+            "CB (%)": cb_frac * 100 if pd.notna(cb_frac) else 0,
             "Time (s)": time_s
         })
 
@@ -169,86 +169,6 @@ def aggregate_all_results():
     print("="*160 + "\n")
     
     df.to_csv(os.path.join(out_dir, "master_wp2_results.csv"), index=False)
-
-    # =========================================================================
-    # VISUAL NARRATIVE (5 Focused Publication Plots)
-    # =========================================================================
-    sns.set_theme(style="whitegrid", font_scale=1.1)
-    df_plot = df.copy()
-
-    # --- PLOT 1: Spatial Resource Explosion (Qubit Footprint) ---
-    df_qubits = df_plot.dropna(subset=["P-Qub", "L-Qub"]).drop_duplicates(subset=["Grid", "Enc", "Prec"])
-    if not df_qubits.empty:
-        fig, ax1 = plt.subplots(figsize=(10, 6))
-        melted = pd.melt(df_qubits, id_vars=["Grid", "Enc"], value_vars=["L-Qub", "P-Qub"], 
-                         var_name="Qubit Type", value_name="Count")
-        sns.barplot(data=melted, x="Grid", y="Count", hue="Qubit Type", ax=ax1, palette=["#3498db", "#e74c3c"])
-        ax1.set_title("Spatial Resource Scaling: Logical vs. Physical Qubits (Minor-Embedding Overhead)")
-        ax1.set_ylabel("Qubit Count")
-        ax1.set_xlabel("Grid Topology")
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "plot_1_spatial_scaling.png"), dpi=300)
-        plt.close()
-
-    # --- PLOT 2: Graph Density & Dynamic Range ---
-    df_density = df_plot.dropna(subset=["DynRng", "Dens (%)"]).drop_duplicates(subset=["Grid", "Enc", "Prec"])
-    if not df_density.empty:
-        fig, ax1 = plt.subplots(figsize=(10, 6))
-        sns.scatterplot(data=df_density, x="Dens (%)", y="DynRng", hue="Enc", style="Grid", s=150, palette="viridis", ax=ax1)
-        ax1.set_yscale("log")
-        ax1.axhline(32, color='orange', linestyle='--', alpha=0.7, label='5-bit DAC Full Scale (32)')
-        ax1.axhline(1000, color='red', linestyle='--', alpha=0.7, label='Critical Noise Floor (1000)')
-        ax1.set_title("Analog Bottlenecks: Dynamic Range vs. Problem Density")
-        ax1.set_xlabel("QUBO Interaction Density (%)")
-        ax1.set_ylabel("Dynamic Range (Log Scale)")
-        ax1.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "plot_2_density_and_dynamic_range.png"), dpi=300)
-        plt.close()
-
-    # --- PLOT 3: The DAC Trap (At-Risk Fraction vs Optimality Gap) ---
-    df_risk = df_plot.dropna(subset=["At-Risk (%)", "Opt-Gap (%)"])
-    if not df_risk.empty:
-        plt.figure(figsize=(9, 5))
-        sns.scatterplot(data=df_risk, x="At-Risk (%)", y="Opt-Gap (%)", hue="Solver", style="Enc", s=120, palette="tab10")
-        plt.title("The DAC Trap: Impact of Sub-LSB Truncation on Solution Quality")
-        plt.xlabel("Matrix Coefficients Below Hardware Noise Floor (At-Risk %)")
-        plt.ylabel("Optimality Gap vs Classical IP (%)")
-        plt.axvline(50, color='gray', linestyle=':', label='50% Information Loss')
-        plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "plot_3_dac_trap_optimality.png"), dpi=300)
-        plt.close()
-
-    # --- PLOT 4: Multi-Solver Economic Performance Across Grids ---
-    df_solvers = df_plot.dropna(subset=["Cost (€)"])
-    if not df_solvers.empty:
-        plt.figure(figsize=(11, 6))
-        sns.barplot(data=df_solvers, x="Grid", y="Cost (€)", hue="Solver", palette="magma")
-        plt.title("Economic Dispatch Cost by Solver Backend Across Grid Topologies")
-        plt.ylabel("Generation Cost (EUR/hr)")
-        plt.xlabel("Grid Topology")
-        plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "plot_4_solver_economic_comparison.png"), dpi=300)
-        plt.close()
-
-    # --- PLOT 5: Computational Time Complexity ---
-    df_time = df_plot.dropna(subset=["Time (s)"])
-    if not df_time.empty:
-        plt.figure(figsize=(10, 5))
-        sns.lineplot(data=df_time, x="Grid", y="Time (s)", hue="Solver", marker="o", linewidth=2.5, palette="Dark2")
-        plt.yscale("log")
-        plt.title("Solver Execution Scaling: Classical vs. Analog Physics Engines")
-        plt.ylabel("Total Execution Time (Seconds, Log Scale)")
-        plt.xlabel("Grid Topology")
-        plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "plot_5_runtime_scaling.png"), dpi=300)
-        plt.close()
-
-    print(f"[+] Aggregation complete. Master Pivot Table printed, CSV and 5 Thesis Plots saved to: {out_dir}/")
-
 
 if __name__ == "__main__":
     aggregate_all_results()

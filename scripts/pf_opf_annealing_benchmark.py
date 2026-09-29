@@ -28,13 +28,14 @@ class NumpyEncoder(json.JSONEncoder):
         if isinstance(obj, (bool, np.bool_)): return bool(obj)
         return super(NumpyEncoder, self).default(obj)
 
+
 def save_payload(data: dict, filepath: str):
     save_dir = os.path.dirname(filepath)
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, cls=NumpyEncoder)
-    print(f"[I/O] Payload saved to {filepath}")
+
 
 def print_execution_summary(payloads: dict, config: dict = None):
     """Parses saved payloads and prints pivot tables of key OPF metrics and hardware complexity."""
@@ -90,14 +91,14 @@ def print_execution_summary(payloads: dict, config: dict = None):
             
             # HW limits might be directly under problem_complexity depending on the solver
             hw_limits = comp.get("hardware_limits", {})
-            dr = hw_limits.get("dynamic_range", "N/A")
+            dr = hw_limits.get("ising_dynamic_range", "N/A")
 
             p_qub = hw.get("physical_qubits", "N/A")
             max_chain = hw.get("max_chain_length", "N/A")
 
             # Safely format fractional metrics (handling 0.0 correctly)
             sampler_stats = alg.get("sampler_stats", {})
-            cb_frac = sampler_stats.get("chain_break_fraction_mean")
+            cb_frac = sampler_stats.get("raw_chain_break_fraction_mean")
             cb = f"{cb_frac * 100:.3f}%" if cb_frac is not None else "N/A"
 
             risk_frac = feas.get("at_risk_fraction")
@@ -227,7 +228,6 @@ def run_pipeline(formulator_config, pristine_net, num_reads=500, num_sweeps=2000
     samplers_to_test = ["sa", "svmc", "sqa"]
 
     for sampler_type in samplers_to_test:
-        print(f"\n[+] Booting EmulatedQPU with backend: {sampler_type.upper()}")
         emulator_solver = EmulatedQPUSolver(
             **formulator_config, 
             num_reads=num_reads, 
@@ -274,7 +274,7 @@ def run_pipeline(formulator_config, pristine_net, num_reads=500, num_sweeps=2000
 if __name__ == "__main__":
     # If you run main.py directly, it just tests one configuration natively.
     default_config = {
-        "formulation": "dc_ptdf",
+        "formulation": "dc_theta",
         "encoding": "radix",
         "mw_precision": 10.0, 
     }
@@ -282,4 +282,4 @@ if __name__ == "__main__":
     num_reads = 300
     num_sweeps = 5000
 
-    run_pipeline(default_config, pn.case5(), num_reads=num_reads, num_sweeps=num_sweeps)
+    run_pipeline(default_config, case3_low_gen(), num_reads=num_reads, num_sweeps=num_sweeps)
