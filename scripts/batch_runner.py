@@ -18,10 +18,10 @@ if __name__ == "__main__":
     
     # 1. Define the Grids
     grid_generators = [
-        case3_low_gen,
+        #case3_low_gen,
         #case4_high_gen,
         #pn.case5,
-        #pn.case9,
+        pn.case9,
         #pn.case14
     ]
     
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     
     # 3. Define the SQA Hyperparameters
     num_reads = 500
-    num_sweeps = 5000
+    num_sweeps = 3000
     
     total_runs = len(grid_generators) * len(formulations) * len(encodings) * len(precisions)
 

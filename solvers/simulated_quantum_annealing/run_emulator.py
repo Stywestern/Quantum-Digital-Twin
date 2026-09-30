@@ -29,7 +29,7 @@ class EmulatedQPUSolver(QuboFormulator):
         self.trotter_slices = trotter_slices  # Added
         
         # Hardware & Analog parameters
-        self.hardware = hardware_profile or Hardware.ideal_zephyr(m=4, t=4)
+        self.hardware = hardware_profile or Hardware.ideal_zephyr(m=12, t=4)
         self.sampler_type = sampler
         self.dac_bits = dac_bits
         self.ice_sigma_h = ice_sigma_h

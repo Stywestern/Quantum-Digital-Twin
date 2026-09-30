@@ -20,7 +20,7 @@ class QuboFormulator():
 
     def __init__(self, formulation="dc", mw_precision=1.0, 
                  angle_precision=None, penalty_balance=None, penalty_line=None,
-                 encoding="radix", penalty_safety=1.0, ptdf_threshold=1e-4,
+                 encoding="radix", penalty_safety=1.0, ptdf_threshold=0.5,
                  hybrid_chunk_size=25.0, feasibility_tol_mw=None, rebalance_slack=True,
                  scale_line_constraints=True, smart_slack_side=True,
                  slack_precision_factor=1.0, decode_with_full_ptdf=True,

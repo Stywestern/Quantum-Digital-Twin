@@ -76,10 +76,10 @@
             "status": "Success",
             "solver_name": "emulated_qpu_sa_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.7898,
-                "formulation_cpu": 0.0016,
-                "embedding_cpu": 0.0265,
-                "sampling_analog_sim": 0.7613
+                "total": 0.5978,
+                "formulation_cpu": 0.0015,
+                "embedding_cpu": 0.0992,
+                "sampling_analog_sim": 0.4967
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -126,11 +126,11 @@
                 "penalty_line": null
             },
             "hardware_metrics": {
-                "qpu_target": "ideal_zephyr_Z(4,4)",
+                "qpu_target": "ideal_zephyr_Z(12,4)",
                 "topology": {
                     "type": "zephyr",
                     "shape": [
-                        4,
+                        12,
                         4
                     ]
                 },
@@ -149,16 +149,16 @@
                 "framework": "hardware_aware_analog_simulation",
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 5000,
+                    "num_sweeps_per_read": 3000,
                     "unique_states_found_sds": 500,
                     "raw_energy_best_logical": 3268.92,
-                    "raw_energy_mean_logical": 4297.44,
+                    "raw_energy_mean_logical": 4170.92,
                     "raw_chain_break_fraction_mean": 0.0,
                     "sds_energy_best_logical": 3268.92,
-                    "sds_energy_mean_logical": 4023.63,
+                    "sds_energy_mean_logical": 3846.95,
                     "sds_chain_break_fraction_mean": 0.0,
-                    "postprocess_physical_flips": 395,
-                    "postprocess_logical_flips": 0
+                    "postprocess_physical_flips": 403,
+                    "postprocess_logical_flips": 46
                 }
             }
         }
