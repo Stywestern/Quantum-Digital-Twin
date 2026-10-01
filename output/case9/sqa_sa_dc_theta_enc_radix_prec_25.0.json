@@ -93,10 +93,10 @@
             "status": "Success",
             "solver_name": "emulated_qpu_sa_dc_theta",
             "execution_time_seconds": {
-                "total": 59.97,
-                "formulation_cpu": 0.0074,
-                "embedding_cpu": 34.7664,
-                "sampling_analog_sim": 25.1919
+                "total": 127.9185,
+                "formulation_cpu": 0.0121,
+                "embedding_cpu": 72.4832,
+                "sampling_analog_sim": 55.4157
             },
             "problem_complexity": {
                 "formulation": "dc_theta",

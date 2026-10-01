@@ -26,7 +26,7 @@ if __name__ == "__main__":
     ]
     
     # 2. Define the parameter space
-    formulations = ["dc_ptdf", "dc_theta"]
+    formulations = ["dc_theta"] #"dc_ptdf", 
     encodings = ["radix", "hybrid"]
     precisions = [50.0, 25.0, 10.0, 5.0, 1.0]
     

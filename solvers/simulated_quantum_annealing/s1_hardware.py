@@ -119,11 +119,14 @@ def beta_eff(B_ghz: float, temperature_mk: float) -> float:
 # =========================================================================
 # Execution Block: Self-Test
 # =========================================================================
+# =========================================================================
+# Execution Block: Self-Test
+# =========================================================================
 if __name__ == "__main__":
     import os
 
     print("=== Testing Hardware Offline Initialization ===")
-    # 1. Create a smaller ideal Zephyr graph for a quick test, $$N = 4 \cdot t \cdot m \cdot (2m + 1)$$ where N is qubit count
+    # 1. Create a smaller ideal Zephyr graph for a quick test
     hw_ideal = Hardware.ideal_zephyr(m=4, t=4)
     print(f"[+] Initialized: {hw_ideal.summary()}")
     print(f"[+] Default Ranges: h={hw_ideal.h_range}, j={hw_ideal.j_range}")
@@ -140,24 +143,31 @@ if __name__ == "__main__":
     print(f"[+] Loaded snapshot: {hw_loaded.summary()}")
     
     # Clean up the test file
-    if os.path.exists(test_filepath):
-        os.remove(test_filepath)
-        print(f"[+] Cleaned up {test_filepath}")
+    #if os.path.exists(test_filepath):
+    #    os.remove(test_filepath)
+    #    print(f"[+] Cleaned up {test_filepath}")
 
     print("\n=== Testing Annealing Schedule & Interpolation ===")
-    # 4. Generate placeholder schedule and test interpolation at s=0.5
-    schedule = Schedule.placeholder()
+    # 4. Generate mock CSV, load both schedules, and compare
+    csv_path = "solvers/simulated_quantum_annealing/standart_annealing_schedule_Ad2Sys1.csv"
+
+    schedule_ph = Schedule.placeholder()
+    schedule_csv = Schedule.from_csv(csv_path)
+    
     s_val = 0.5
-    a_val, b_val = schedule.at(s_val)
+    a_ph, b_ph = schedule_ph.at(s_val)
+    a_csv, b_csv = schedule_csv.at(s_val)
+    
     print(f"[+] At anneal fraction s={s_val}:")
-    print(f"    Transverse field A(s)  = {a_val:.3f} GHz")
-    print(f"    Problem scale B(s)     = {b_val:.3f} GHz")
+    print(f"    Placeholder   : A(s) = {a_ph:.3f} GHz, B(s) = {b_ph:.3f} GHz")
+    print(f"    CSV           : A(s) = {a_csv:.3f} GHz, B(s) = {b_csv:.3f} GHz")
+    print(f"    Difference    : \u0394A = {abs(a_ph - a_csv):.3f} GHz, \u0394B = {abs(b_ph - b_csv):.3f} GHz")
 
     print("\n=== Testing Thermodynamic Physics ===")
-    # 5. Test the effective beta calculation
+    # 5. Test the effective beta calculation using the placeholder B value
     temp_mk = 15.0  # 15 millikelvin fridge
-    beta = beta_eff(B_ghz=b_val, temperature_mk=temp_mk)
-    print(f"[+] Effective beta at {temp_mk} mK and B(s)={b_val:.3f} GHz : {beta:.4f}")
+    beta = beta_eff(B_ghz=b_ph, temperature_mk=temp_mk)
+    print(f"[+] Effective beta at {temp_mk} mK and B(s)={b_ph:.3f} GHz : {beta:.4f}")
 
     print("\n=== Testing Live QPU Fetch ===")
     # 6. Try fetching from D-Wave Leap (Expected to fail without token)
