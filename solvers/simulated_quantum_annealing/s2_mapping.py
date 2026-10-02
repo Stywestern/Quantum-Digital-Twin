@@ -89,9 +89,12 @@ def add_ice_noise(ar: IsingArrays, sigma_h: float, sigma_j: float, rng: np.rando
 # =========================================================================
 if __name__ == "__main__":
     import pandapower.networks as nw
-    
+    import dimod
+    import numpy as np
+
     try:
         from solvers.qubo_formulator import QuboFormulator
+        # Adjust import path for IsingArrays, scale_to_hardware, quantise, add_ice_noise
     except ImportError:
         print("[-] Could not import QuboFormulator. Ensure script is run from project root.")
         exit(1)
@@ -104,8 +107,7 @@ if __name__ == "__main__":
     if not net.ext_grid.empty:
         net.ext_grid['min_p_mw'] = 0.0
     
-    # We use high precision (1 MW) so the dynamic range is naturally large
-    formulator = QuboFormulator(formulation="dc_ptdf", mw_precision=1.0)
+    formulator = QuboFormulator(formulation="dc_ptdf", mw_precision=10.0, encoding="radix")
     bqm, _ = formulator._formulate_qubo(net)
     
     if len(bqm.variables) == 0:
@@ -114,51 +116,72 @@ if __name__ == "__main__":
         
     print(f"    -> Logical BQM: {len(bqm.variables)} vars, {len(bqm.quadratic)} edges.")
 
-    # 2. Abstract into IsingArrays
-    print("\n[2] Converting to IsingArrays for bulk numpy operations...")
-    ar_logical = IsingArrays.from_bqm(bqm.change_vartype(dimod.SPIN, inplace=False))
-    max_h_orig = np.max(np.abs(ar_logical.h)) if len(ar_logical.h) > 0 else 0
-    max_j_orig = np.max(np.abs(ar_logical.J)) if len(ar_logical.J) > 0 else 0
-    print(f"    -> Original Max |h|: {max_h_orig:.2f}")
-    print(f"    -> Original Max |J|: {max_j_orig:.2f}")
+    # 2. Variable-Level Coefficient Analysis
+    print("\n[2] Analyzing Logical Coefficient Extremes...")
     
-    # Check dynamic range (max / min_nonzero)
-    nonzero_orig = [abs(v) for v in np.concatenate([ar_logical.h, ar_logical.J]) if abs(v) > 1e-10]
-    dr_orig = max(nonzero_orig) / min(nonzero_orig) if nonzero_orig else 1.0
-    print(f"    -> Original Dynamic Range: {dr_orig:,.1f}")
+    # Filter out near-zero coefficients to find the true minimums
+    h_items = [(v, abs(bias)) for v, bias in bqm.linear.items() if abs(bias) > 1e-10]
+    j_items = [(u, v, abs(bias)) for (u, v), bias in bqm.quadratic.items() if abs(bias) > 1e-10]
+    
+    if h_items:
+        h_max_var, h_max_val = max(h_items, key=lambda item: item[1])
+        h_min_var, h_min_val = min(h_items, key=lambda item: item[1])
+        print(f"    -> Max |h|: {h_max_val:,.2f} (Variable: '{h_max_var}')")
+        print(f"    -> Min |h|: {h_min_val:,.2f} (Variable: '{h_min_var}')")
+    
+    if j_items:
+        j_max_u, j_max_v, j_max_val = max(j_items, key=lambda item: item[2])
+        j_min_u, j_min_v, j_min_val = min(j_items, key=lambda item: item[2])
+        print(f"    -> Max |J|: {j_max_val:,.2f} (Coupler: '{j_max_u}' <-> '{j_max_v}')")
+        print(f"    -> Min |J|: {j_min_val:,.2f} (Coupler: '{j_min_u}' <-> '{j_min_v}')")
 
-    # 3. Simulate Hardware Scaling (auto_scale)
-    # Using typical Advantage values: h in [-4, 4], J in [-1, 1]
-    print("\n[3] Scaling to hardware limits (h: [-4, 4], j: [-1, 1])...")
+    # 3. Abstract into IsingArrays
+    print("\n[3] Converting to IsingArrays for bulk numpy operations...")
+    ar_logical = IsingArrays.from_bqm(bqm.change_vartype(dimod.SPIN, inplace=False))
+    
+    # Note: dimod.SPIN conversion shifts QUBO variables (0,1) to Ising variables (-1,1).
+    # This mathematically alters the linear and constant terms, but the quadratic J terms 
+    # typically divide by 4. The dynamic range relationships remain fundamentally intact.
+    
+    # 4. Simulate Hardware Scaling (auto_scale)
+    print("\n[4] Scaling to hardware limits (h: [-4, 4], J: [-1, 1])...")
     h_range = (-4.0, 4.0)
     j_range = (-1.0, 1.0)
     
+    # Calculate headroom based on the Ising converted values
+    max_h_ising = np.max(np.abs(ar_logical.h)) if len(ar_logical.h) > 0 else 0
+    max_j_ising = np.max(np.abs(ar_logical.J)) if len(ar_logical.J) > 0 else 0
+    
+    f_h_limit = h_range[1] / max_h_ising if max_h_ising > 0 else np.inf
+    f_j_limit = j_range[1] / max_j_ising if max_j_ising > 0 else np.inf
+    
+    print(f"    -> Available headroom for h: {f_h_limit:e}")
+    print(f"    -> Available headroom for J: {f_j_limit:e}")
+    
     ar_scaled, scale_factor = scale_to_hardware(ar_logical, h_range, j_range)
-    print(f"    -> Scale Factor Applied: {scale_factor:e}")
+    print(f"    -> Applied bottleneck Scale Factor: {scale_factor:e}")
+    
     max_h_scaled = np.max(np.abs(ar_scaled.h)) if len(ar_scaled.h) > 0 else 0
     max_j_scaled = np.max(np.abs(ar_scaled.J)) if len(ar_scaled.J) > 0 else 0
-    print(f"    -> Post-Scale Max |h|: {max_h_scaled:.4f}")
-    print(f"    -> Post-Scale Max |J|: {max_j_scaled:.4f}")
+    print(f"    -> Post-Scale Max |h|: {max_h_scaled:.4f} (Limit: 4.0)")
+    print(f"    -> Post-Scale Max |J|: {max_j_scaled:.4f} (Limit: 1.0)")
 
-    # 4. Simulate Finite DAC Precision (Quantization)
-    print("\n[4] Simulating 5-bit DAC Quantization...")
+    # 5. Simulate Finite DAC Precision
+    print("\n[5] Simulating 5-bit DAC Quantization...")
     ar_quantized = quantise(ar_scaled, h_range, j_range, bits=5)
     
-    # Calculate how many coefficients were erased to 0.0 by quantization
-    nonzero_scaled_count = np.sum(np.abs(ar_scaled.J) > 1e-10)
-    nonzero_quant_count = np.sum(np.abs(ar_quantized.J) > 1e-10)
-    erased = nonzero_scaled_count - nonzero_quant_count
-    print(f"    -> {erased} J-couplers (out of {len(ar_scaled.J)}) were erased to exactly 0.0 by DAC resolution.")
+    nonzero_scaled_j = np.sum(np.abs(ar_scaled.J) > 1e-10)
+    nonzero_quant_j = np.sum(np.abs(ar_quantized.J) > 1e-10)
+    erased = nonzero_scaled_j - nonzero_quant_j
+    print(f"    -> {erased} J-couplers (out of {nonzero_scaled_j}) were erased to exactly 0.0.")
 
-    # 5. Simulate Analog ICE Noise
-    print("\n[5] Injecting Analog ICE Noise (sigma = 0.01)...")
+    # 6. Simulate Analog ICE Noise
+    print("\n[6] Injecting Analog ICE Noise (sigma = 0.01)...")
     rng = np.random.default_rng(seed=42)
-    # 0.01 is 1% of the full scale
     ar_noisy = add_ice_noise(ar_quantized, sigma_h=0.01, sigma_j=0.01, rng=rng)
     
-    # Measure the RMS error introduced by noise and quantization combined
-    err_h = np.sqrt(np.mean((ar_noisy.h - ar_scaled.h)**2))
-    err_j = np.sqrt(np.mean((ar_noisy.J - ar_scaled.J)**2))
+    err_h = np.sqrt(np.mean((ar_noisy.h - ar_scaled.h)**2)) if len(ar_noisy.h) > 0 else 0
+    err_j = np.sqrt(np.mean((ar_noisy.J - ar_scaled.J)**2)) if len(ar_noisy.J) > 0 else 0
     print(f"    -> RMS |h| deviation from ideal: {err_h:.4f}")
     print(f"    -> RMS |J| deviation from ideal: {err_j:.4f}")
     

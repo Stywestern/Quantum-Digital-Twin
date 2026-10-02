@@ -20,13 +20,15 @@ import scipy.sparse as sp
 from solvers.simulated_quantum_annealing.s1_hardware import KB_OVER_H_GHZ_PER_K, Schedule, beta_eff
 from solvers.simulated_quantum_annealing.s2_mapping import IsingArrays
 
-
 class SAFreezeout:
     def __init__(self, schedule: Schedule, temperature_mk: float = 12.0, freeze_s: float = 0.6,
-                 num_sweeps: int = 1000, beta_hot: float = 0.1):
-        """freeze_s is the point on the schedule where dynamics stop (a calibration parameter)."""
+                 num_sweeps: int = 1000, beta_hot: float = 0.1, use_auto_beta: bool = False):
+        """freeze_s is the point on the schedule where dynamics stop (a calibration parameter).
+        use_auto_beta: If True, ignores the hardware freeze-out and uses neal's classical heuristic."""
+        
         self.schedule, self.temperature_mk = schedule, temperature_mk
         self.freeze_s, self.num_sweeps, self.beta_hot = freeze_s, num_sweeps, beta_hot
+        self.use_auto_beta = use_auto_beta
 
     def beta_final(self) -> float:
         _, B = self.schedule.at(self.freeze_s)
@@ -37,11 +39,19 @@ class SAFreezeout:
             from dwave.samplers import SimulatedAnnealingSampler
         except ImportError:
             from neal import SimulatedAnnealingSampler
+        
         bqm = ar.to_bqm()
-        bf = self.beta_final()
+        
+        if self.use_auto_beta:
+            beta_range = None
+        else:
+            bf = self.beta_final()
+            beta_range = (min(self.beta_hot, bf / 10.0), bf)
+            
         res = SimulatedAnnealingSampler().sample(
             bqm, num_reads=num_reads, num_sweeps=self.num_sweeps,
-            beta_range=(min(self.beta_hot, bf / 10.0), bf), seed=int(seed))
+            beta_range=beta_range, seed=int(seed))
+            
         lab = list(res.variables)
         pos = {v: i for i, v in enumerate(lab)}
         order = [pos[v] for v in ar.labels]
@@ -183,14 +193,17 @@ def make_sampler(kind: str, schedule: Schedule, temperature_mk: float, **kw):
 # =========================================================================
 if __name__ == "__main__":
     import time
+    import io
     import dimod
+    import numpy as np
     
     try:
         from homemade_grids.small_grids import case3_low_gen
         from solvers.qubo_formulator import QuboFormulator
         from solvers.simulated_quantum_annealing.s1b_embedding import find_embeddings, select_best
-        from solvers.simulated_quantum_annealing.s1_hardware import Hardware
-        from solvers.simulated_quantum_annealing.s2_mapping import scale_to_hardware, quantise, add_ice_noise
+        from solvers.simulated_quantum_annealing.s1_hardware import Hardware, Schedule
+        from solvers.simulated_quantum_annealing.s2_mapping import IsingArrays, scale_to_hardware, quantise, add_ice_noise
+        from solvers.simulated_quantum_annealing.s3_samplers import make_sampler
         from dwave.embedding import embed_bqm
         from dwave.embedding.chain_strength import uniform_torque_compensation
     except ImportError as e:
@@ -200,7 +213,7 @@ if __name__ == "__main__":
     print("=== Testing All Sampler Backends on case3_low_gen ===")
 
     # 1. Formulation
-    print("[1] Formulating Grid...")
+    print("\n[1] Formulating Grid (DC-PTDF, 10 MW precision)...")
     net = case3_low_gen()
     if not net.ext_grid.empty: 
         net.ext_grid['min_p_mw'] = 0.0
@@ -209,22 +222,54 @@ if __name__ == "__main__":
     logical_bqm, _ = formulator._formulate_qubo(net)
     logical_spin = logical_bqm.change_vartype(dimod.SPIN, inplace=False)
 
-    # 2. Minor-Embedding
-    print("[2] Minor-Embedding to Z4...")
-    hw = Hardware.ideal_zephyr(m=4, t=4)
+    # 2. Minor-Embedding & Chain Diagnostics
+    print("\n[2] Minor-Embedding to Z12 & Analyzing Chains...")
+    hw = Hardware.ideal_zephyr(m=12, t=4)
     emb_results = find_embeddings(logical_spin, hw, methods=["minorminer"], seeds=[0], verbose=False)
     _, embedding = select_best(emb_results)
     
-    cs = uniform_torque_compensation(logical_spin)
-    embedded_bqm = embed_bqm(logical_spin, embedding, hw.graph, chain_strength=cs)
+    chain_lengths = [len(c) for c in embedding.values()]
+    max_chain = max(chain_lengths) if chain_lengths else 0
+    mean_chain = sum(chain_lengths) / len(chain_lengths) if chain_lengths else 0
+    
+    # 1. Find the absolute maximum energy coefficient in your logical problem
+    max_logical_weight = max(
+        max(abs(v) for v in logical_spin.linear.values()) if logical_spin.linear else 0,
+        max(abs(v) for v in logical_spin.quadratic.values()) if logical_spin.quadratic else 0
+    )
+
+    # 2. Define a relative multiplier (usually between 0.5 and 2.0)
+    # A multiplier of 1.0 means the chains are exactly as strong as the heaviest grid constraint.
+    relative_chain_multiplier = 1.0 
+    capped_cs = max_logical_weight * relative_chain_multiplier
+
+    embedded_bqm = embed_bqm(logical_spin, embedding, hw.graph, chain_strength=capped_cs)
     ar_ideal = IsingArrays.from_bqm(embedded_bqm)
 
+    print(f"    -> Max Chain Length: {max_chain} physical qubits")
+    print(f"    -> Mean Chain Length: {mean_chain:.2f} physical qubits")
+    print(f"    -> Raw Artificial Chain Strength (J_chain): {capped_cs:,.2f}")
+
     # 3. Analog Hardware Mapping
-    print("[3] Mapping to Analog Hardware (5-bit DAC, 0.01 ICE)...")
-    ar_scaled, _ = scale_to_hardware(ar_ideal, hw.h_range, hw.extended_j_range)
+    print("\n[3] Mapping to Analog Hardware (5-bit DAC, 0.01 ICE)...")
+    ar_scaled, scale_factor = scale_to_hardware(ar_ideal, hw.h_range, hw.extended_j_range)
     ar_quant = quantise(ar_scaled, hw.h_range, hw.extended_j_range, bits=5)
+    
     rng = np.random.default_rng(42)
-    ar_physical = add_ice_noise(ar_quant, sigma_h=0.01, sigma_j=0.01, rng=rng)
+    ice_sigma = 0.01
+    ar_physical = add_ice_noise(ar_quant, sigma_h=ice_sigma, sigma_j=ice_sigma, rng=rng)
+
+    # Calculate what happened to the chains during down-scaling
+    scaled_cs = capped_cs * scale_factor
+    print(f"    -> Global Scale Factor applied: {scale_factor:e}")
+    print(f"    -> Scaled Chain Strength: {scaled_cs:.5f} (Physical Limit: 1.0)")
+    print(f"    -> ICE Noise Floor (sigma): {ice_sigma}")
+    
+    if scaled_cs < ice_sigma:
+        print("    -> [!] CRITICAL WARNING: Scaled chain strength is below the analog noise floor.")
+        print("    -> [!] The magnetic glue holding chains together is weaker than the ambient heat.")
+    elif scaled_cs < 0.0625: # Half a step size on a 5-bit DAC for [-1, 1]
+        print("    -> [!] CRITICAL WARNING: Scaled chain strength is erased by 5-bit DAC quantization.")
 
     # 4. Helper for Chain Breaks
     def get_chain_break_fraction(samples, emb, labels):
@@ -238,37 +283,52 @@ if __name__ == "__main__":
             if len(chain) > 1:
                 idxs = [pos[q] for q in chain]
                 chain_spins = samples[:, idxs]
-                # A chain is broken if the sum of its (+1/-1) spins does not equal its length
+                # Chain breaks if the physical qubits do not all perfectly align (+1 or -1)
                 is_broken = np.abs(chain_spins.sum(axis=1)) != len(chain)
                 broken_chains += is_broken
                 
         return (broken_chains / total_chains).mean()
 
-    # 5. Shared Physics Parameters
-    schedule = Schedule.placeholder()
-    temp_mk = 15.0  
-    num_reads = 100
-    num_sweeps = 1000
-
-    # 6. Execute and Benchmark Each Engine
-    print("\n" + "="*60)
-    print(f"{'Engine':<10} | {'Time (s)':<10} | {'Unique States':<15} | {'Chain Breaks (%)'}")
-    print("="*60)
+    # 5. Define Competing Schedules
+    # A. The smooth mathematical placeholder
+    sched_placeholder = Schedule.placeholder()
     
-    for kind in ["sa", "svmc", "sqa"]:
-        kwargs = {"num_sweeps": num_sweeps}
-        if kind == "sqa":
-            kwargs["trotter_slices"] = 16  # High enough for accuracy, low enough for speed
-            
-        sampler = make_sampler(kind, schedule, temp_mk, **kwargs)
+    # B. A synthesized physical QPU curve (A decays fast, B spikes exponentially at the end)
+    sched_real = Schedule.from_csv("solvers/simulated_quantum_annealing/standart_annealing_schedule_Ad2Sys1.csv")
+    
+    schedules = {
+        "Math Placeholder": sched_placeholder,
+        "Simulated Real QPU": sched_real
+    }
 
-        t0 = time.time()
-        samples = sampler.sample(ar_physical, num_reads=num_reads, seed=42)
-        t_exec = time.time() - t0
+    # 6. Execute and Benchmark
+    temp_mk = 12.0  
+    num_reads = 300
+    num_sweeps = 5000
 
-        cbf = get_chain_break_fraction(samples, embedding, ar_physical.labels) * 100
-        unique_states = len(np.unique(samples, axis=0))
+    print("\n" + "="*85)
+    print(f"{'Schedule':<20} | {'Engine':<6} | {'Time (s)':<8} | {'Unique States':<13} | {'Chain Breaks (%)'}")
+    print("="*85)
+    
+    for sched_name, schedule in schedules.items():
+        for kind in ["sa", "svmc", "sqa"]:
+            kwargs = {"num_sweeps": num_sweeps}
+            if kind == "sqa":
+                kwargs["trotter_slices"] = 16 
+                
+            sampler = make_sampler(kind, schedule, temp_mk, **kwargs)
 
-        print(f"{kind.upper():<10} | {t_exec:<10.4f} | {unique_states:<15} | {cbf:.2f}%")
+            t0 = time.time()
+            samples = sampler.sample(ar_physical, num_reads=num_reads, seed=42)
+            t_exec = time.time() - t0
+
+            cbf = get_chain_break_fraction(samples, embedding, ar_physical.labels) * 100
+            unique_states = len(np.unique(samples, axis=0))
+
+            print(f"{sched_name:<20} | {kind.upper():<6} | {t_exec:<8.4f} | {unique_states:<13} | {cbf:.2f}%")
         
-    print("="*60 + "\n")
+        # Print a separator between schedule blocks
+        if sched_name == "Math Placeholder":
+            print("-" * 85)
+            
+    print("="*85 + "\n")

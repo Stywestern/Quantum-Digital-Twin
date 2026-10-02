@@ -1,5 +1,5 @@
 ###############################################################################################################
-#                                            SETUP
+#                                           SETUP
 ###############################################################################################################
 # Library imports
 import pandapower as pp
@@ -35,6 +35,12 @@ def save_payload(data: dict, filepath: str):
         os.makedirs(save_dir, exist_ok=True)
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, cls=NumpyEncoder)
+
+
+def load_payload(filepath: str) -> dict:
+    """Loads an existing JSON payload from disk."""
+    with open(filepath, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
 
 def print_execution_summary(payloads: dict, config: dict = None):
@@ -78,7 +84,6 @@ def print_execution_summary(payloads: dict, config: dict = None):
             hw = opf_meta.get("hardware_metrics", {})
             alg = opf_meta.get("algorithmic_metrics", {})
             
-            # SQA puts this at root metadata, SA doesn't have it
             feas = opf_meta.get("hardware_feasibility_report", {})
 
             form = comp.get("formulation", "N/A")
@@ -89,25 +94,20 @@ def print_execution_summary(payloads: dict, config: dict = None):
             l_qub = q_domain.get("total_logical_qubits", "N/A")
             dens = q_domain.get("density_percent", "N/A")
             
-            # HW limits might be directly under problem_complexity depending on the solver
             hw_limits = comp.get("hardware_limits", {})
             dr = hw_limits.get("ising_dynamic_range", "N/A")
 
             p_qub = hw.get("physical_qubits", "N/A")
             max_chain = hw.get("max_chain_length", "N/A")
 
-            # Safely format fractional metrics (handling 0.0 correctly)
             sampler_stats = alg.get("sampler_stats", {})
-            cb_frac = sampler_stats.get("raw_chain_break_fraction_mean")
+            cb_frac = sampler_stats.get("mean_chain_break_fraction")
             cb = f"{cb_frac * 100:.3f}%" if cb_frac is not None else "N/A"
 
             risk_frac = feas.get("at_risk_fraction")
             risk = f"{risk_frac * 100:.2f}%" if risk_frac is not None else "N/A"
             
-            # Formatting density cleanly
             dens_str = f"{dens}%" if isinstance(dens, (int, float)) else "N/A"
-            
-            # Formatting dynamic range cleanly
             dr_str = f"{dr:,.1f}" if isinstance(dr, (int, float)) else "N/A"
 
             rows_res.append({
@@ -141,7 +141,7 @@ def print_execution_summary(payloads: dict, config: dict = None):
 
 
 ###############################################################################################################
-#                                            Runner
+#                                           Runner
 ###############################################################################################################
 
 def run_pipeline(formulator_config, pristine_net, num_reads=500, num_sweeps=2000, trotter_slices=16):
@@ -157,122 +157,104 @@ def run_pipeline(formulator_config, pristine_net, num_reads=500, num_sweeps=2000
     output_dir = os.path.join("output", grid_name)
     os.makedirs(output_dir, exist_ok=True)
     
-    # Enforce No-Export rule universally before handing grid to solvers
     if not pristine_net.ext_grid.empty:
         pristine_net.ext_grid['min_p_mw'] = 0.0
 
-    # ------------------------------------------------------------------------------------------------------------------------------------ #
-    # STEP 2: Continuous Ground Truth (Classical IP OPF)
-    # ------------------------------------------------------------------------------------------------------------------------------------ #
-    t_start = time.time()
-    
-    ip_solver = ClassicalIPSolver(formulation="dc")
-    net_ip_opf = copy.deepcopy(pristine_net)
-    ip_opf_solution, ip_opf_metadata = ip_solver.solve_opf(net_ip_opf)
-    
-    ip_opf_cost = None
-    if ip_opf_metadata["status"] == "Success":
-        ip_opf_cost = ip_opf_solution['cost_eur_per_hr']
-    else:
-        print("[OPF] Classical solver failed to converge. The grid may be physically infeasible.")
-
-    # Notice pf_validation_results is now omitted since OPF output contains feasibility data natively
-    ground_truth_payload = {
-        "problem_parameters": original_problem_parameters,
-        "opf_results": {"solution": ip_opf_solution, "metadata": ip_opf_metadata}
-    }
-    
-    filename_ip = os.path.join(output_dir, f"classical_ip_{ip_solver.formulation}.json")
-    save_payload(ground_truth_payload, filename_ip)
-    print(f"Step 2 (classical exact solver) Time: {round(time.time() - t_start, 4)} seconds")
-
-    # ------------------------------------------------------------------------------------------------------------------------------------ #
-    # STEP 3: Setup the qubo formulation configuration
-    # ------------------------------------------------------------------------------------------------------------------------------------ #
+    # Setup naming configurations
     form_type = formulator_config["formulation"]
     prec = formulator_config["mw_precision"]
     encoding_type = formulator_config["encoding"]
 
     # ------------------------------------------------------------------------------------------------------------------------------------ #
-    # STEP 4: Discrete Ground truth (Simulated Annealing OPF)
+    # STEP 2: Continuous Ground Truth (Classical IP OPF) - With Cache Check
     # ------------------------------------------------------------------------------------------------------------------------------------ #
-    t_start = time.time()
+    filename_ip = os.path.join(output_dir, f"classical_ip_dc.json")
     
-    sa_solver = SimulatedAnnealingSolver(
-        **formulator_config,
-        num_reads=num_reads,
-        num_sweeps=num_sweeps
-    )
-    
-    net_discrete_opf = copy.deepcopy(pristine_net)
-    discrete_opf_solution, discrete_opf_metadata = sa_solver.solve_opf(net_discrete_opf)
-    
-    if discrete_opf_metadata["status"] != "Success":
-        print("[SA OPF] Solver failed.")
+    if os.path.exists(filename_ip):
+        print(f"[Cache Hit] Skipping Classical IP solver. Loading existing payload: {filename_ip}")
+        ground_truth_payload = load_payload(filename_ip)
+    else:
+        t_start = time.time()
+        ip_solver = ClassicalIPSolver(formulation="dc")
+        net_ip_opf = copy.deepcopy(pristine_net)
+        ip_opf_solution, ip_opf_metadata = ip_solver.solve_opf(net_ip_opf)
+        
+        ground_truth_payload = {
+            "problem_parameters": original_problem_parameters,
+            "opf_results": {"solution": ip_opf_solution, "metadata": ip_opf_metadata}
+        }
+        save_payload(ground_truth_payload, filename_ip)
+        print(f"Step 2 (classical exact solver) Time: {round(time.time() - t_start, 4)} seconds")
 
-    discrete_payload = {
-        "problem_parameters": original_problem_parameters,
-        "opf_results": {"solution": discrete_opf_solution, "metadata": discrete_opf_metadata}
-    }
-    
+    # ------------------------------------------------------------------------------------------------------------------------------------ #
+    # STEP 3: Discrete Ground truth (Simulated Annealing OPF) - With Cache Check
+    # ------------------------------------------------------------------------------------------------------------------------------------ #
     filename_discrete = os.path.join(output_dir, f"sa_{form_type}_enc_{encoding_type}_prec_{prec}.json")
-    save_payload(discrete_payload, filename_discrete)
-    print(f"Step 4 (sa solver) Time: {round(time.time() - t_start, 4)} seconds")
+
+    if os.path.exists(filename_discrete):
+        print(f"[Cache Hit] Skipping Classical SA solver. Loading existing payload: {filename_discrete}")
+        discrete_payload = load_payload(filename_discrete)
+    else:
+        t_start = time.time()
+        sa_solver = SimulatedAnnealingSolver(
+            **formulator_config,
+            num_reads=num_reads,
+            num_sweeps=num_sweeps
+        )
+        net_discrete_opf = copy.deepcopy(pristine_net)
+        discrete_opf_solution, discrete_opf_metadata = sa_solver.solve_opf(net_discrete_opf)
+        
+        discrete_payload = {
+            "problem_parameters": original_problem_parameters,
+            "opf_results": {"solution": discrete_opf_solution, "metadata": discrete_opf_metadata}
+        }
+        save_payload(discrete_payload, filename_discrete)
+        print(f"Step 4 (sa solver) Time: {round(time.time() - t_start, 4)} seconds")
 
     # ------------------------------------------------------------------------------------------------------------------------------------ #
-    # STEP 5: Hardware-Aware Analog Simulation (SA vs SVMC vs SQA)
+    # STEP 4: Hardware-Aware Analog Simulation (Emulator SA) - With Cache Check
     # ------------------------------------------------------------------------------------------------------------------------------------ #
-    t_start = time.time()
-    
-    analog_payloads = {}
-    samplers_to_test = ["sa", "svmc", "sqa"]
+    filename_emu = os.path.join(output_dir, f"sqa_sa_{form_type}_enc_{encoding_type}_prec_{prec}.json")
 
-    for sampler_type in samplers_to_test:
+    if os.path.exists(filename_emu):
+        print(f"[Cache Hit] Skipping Emulated QPU (SA). Loading existing payload: {filename_emu}")
+        emu_payload = load_payload(filename_emu)
+    else:
+        t_start = time.time()
         emulator_solver = EmulatedQPUSolver(
             **formulator_config, 
             num_reads=num_reads, 
             num_sweeps=num_sweeps,
-            sampler=sampler_type,
+            sampler="sa",
             trotter_slices=trotter_slices
         )
 
         net_emu_opf = copy.deepcopy(pristine_net)
         emu_opf_solution, emu_opf_metadata = emulator_solver.solve_opf(net_emu_opf)
 
-        if emu_opf_metadata["status"] != "Success":
-            print(f"[{sampler_type.upper()} OPF] Solver failed.")
-
-        payload = {
+        emu_payload = {
             "problem_parameters": original_problem_parameters,
             "opf_results": {"solution": emu_opf_solution, "metadata": emu_opf_metadata}
         }
-
-        # Prepend 'sqa_' so the aggregation script groups all three under hardware-aware solvers
-        filename_emu = os.path.join(output_dir, f"sqa_{sampler_type}_{form_type}_enc_{encoding_type}_prec_{prec}.json")
-        save_payload(payload, filename_emu)
-        
-        analog_payloads[f"Emulated QPU ({sampler_type.upper()})"] = payload
-
-    print(f"\nStep 5 (Hardware Emulators) Time: {round(time.time() - t_start, 4)} seconds")
+        save_payload(emu_payload, filename_emu)
+        print(f"Step 5 (Hardware Emulator SA) Time: {round(time.time() - t_start, 4)} seconds")
 
     # ------------------------------------------------------------------------------------------------------------------------------------ #
-    # STEP X: Execution Summary
+    # STEP 5: Execution Summary
     # ------------------------------------------------------------------------------------------------------------------------------------ #
     all_payloads = {
-        f"Classical IP ({ip_solver.formulation})": ground_truth_payload,
-        f"Classical SA ({form_type})": discrete_payload
+        "Classical IP (dc)": ground_truth_payload,
+        f"Classical SA ({form_type})": discrete_payload,
+        "Emulated QPU (SA)": emu_payload
     }
-    # Merge the three hardware emulators into the final output
-    all_payloads.update(analog_payloads)
     
     print_execution_summary(all_payloads, formulator_config)
 
 ###############################################################################################################
-#                                        Execution Block
+#                               Execution Block
 ###############################################################################################################
 
 if __name__ == "__main__":
-    # If you run main.py directly, it just tests one configuration natively.
     default_config = {
         "formulation": "dc_theta",
         "encoding": "radix",
@@ -282,4 +264,4 @@ if __name__ == "__main__":
     num_reads = 300
     num_sweeps = 5000
 
-    run_pipeline(default_config, case3_low_gen(), num_reads=num_reads, num_sweeps=num_sweeps)
+    run_pipeline(default_config, pn.case5(), num_reads=num_reads, num_sweeps=num_sweeps)

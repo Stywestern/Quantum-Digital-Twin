@@ -5,14 +5,13 @@ import numpy as np
 
 from solvers.qubo_formulator import QuboFormulator
 
-
 class SimulatedAnnealingSolver(QuboFormulator):
-    def __init__(self, formulation="dc", num_reads=500, num_sweeps=3000, max_time=1800,
+    def __init__(self, formulation="dc", num_reads=500, num_sweeps=3000,
                  mw_precision=10.0, seed=None, max_decode=None, **kwargs):
         """max_decode: cap on how many distinct low-energy reads get decoded/feasibility-checked
         (decoding calls your formulator's PTDF/angle math per sample, so it isn't free). None decodes
         every distinct sample dimod returns (already far fewer than num_reads after aggregation)."""
-        super().__init__(formulation=formulation, max_time=max_time, mw_precision=mw_precision, **kwargs)
+        super().__init__(formulation=formulation, mw_precision=mw_precision, **kwargs)
         self.num_reads = num_reads
         self.num_sweeps = num_sweeps
         self.seed = seed

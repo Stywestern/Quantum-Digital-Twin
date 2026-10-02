@@ -14,21 +14,20 @@ class QuboFormulator():
     ANGLE_HEADROOM = 1.1
 
     FORMULATIONS = ("dc_ptdf", "dc_theta")
-    ENCODINGS = ("radix", "unary", "hybrid")
+    ENCODINGS = ("radix", "unary")
     _DISPATCH_TYPES = ("gen", "sgen", "ext_grid")
     _BIT_PREFIX = {"gen": "gen", "sgen": "sgen", "ext_grid": "ext"}
 
     def __init__(self, formulation="dc", mw_precision=1.0, 
                  angle_precision=None, penalty_balance=None, penalty_line=None,
-                 encoding="radix", penalty_safety=1.0, ptdf_threshold=0.5,
-                 hybrid_chunk_size=25.0, feasibility_tol_mw=None, rebalance_slack=True,
+                 encoding="radix", penalty_safety=1.0, ptdf_threshold=0.5, feasibility_tol_mw=None, rebalance_slack=True,
                  scale_line_constraints=True, smart_slack_side=True,
                  slack_precision_factor=1.0, decode_with_full_ptdf=True,
                  ptdf_rel_threshold=None, ptdf_round_to=None, snap_weights=True,
                  ext_fallback_mult=10.0, risk_noise_frac=0.03125, **kwargs):
         """
         formulation         : "dc_ptdf" (default; "dc" is an alias) or "dc_theta".
-        encoding             : "radix", "unary", "hybrid"
+        encoding             : "radix", "unary"
         angle_precision     : dc_theta only.
         penalty_balance/line: None -> auto derived.
         hybrid_chunk_size    : Size of unary chunks in hybrid encoding (MW).
@@ -54,7 +53,6 @@ class QuboFormulator():
         self.encoding = encoding
         self.penalty_safety = penalty_safety
         self.ptdf_threshold = ptdf_threshold
-        self.hybrid_chunk_size = hybrid_chunk_size
         self.feasibility_tol_mw = feasibility_tol_mw
         self.rebalance_slack = rebalance_slack
         
@@ -121,25 +119,6 @@ class QuboFormulator():
             weights.append(remainder)
         return weights
 
-    def _get_hybrid_weights(self, total_range, precision):
-        if total_range <= 1e-12:
-            return []
-        if total_range <= self.hybrid_chunk_size:
-            return self._get_radix_weights(total_range, precision)
-            
-        radix_coverage = self.hybrid_chunk_size - precision
-        radix_weights = self._get_radix_weights(radix_coverage, precision)
-        
-        remainder = total_range - radix_coverage
-        n_full_chunks = int(remainder // self.hybrid_chunk_size)
-        leftover_chunk = remainder % self.hybrid_chunk_size
-        
-        unary_weights = [self.hybrid_chunk_size] * n_full_chunks
-        if leftover_chunk > 1e-6:
-            unary_weights.append(leftover_chunk)
-            
-        return unary_weights + radix_weights
-
     def _get_weights(self, total_range, precision):
         if total_range <= 0:
             return []
@@ -149,8 +128,6 @@ class QuboFormulator():
             weights = self._get_radix_weights(total_range, precision)
         elif self.encoding == "unary":
             weights = self._get_unary_weights(total_range, precision)
-        elif self.encoding == "hybrid":
-            weights = self._get_hybrid_weights(total_range, precision)
                 
         # Apply weight snapping
         if not self.snap_weights or not precision or precision <= 0:
@@ -995,9 +972,9 @@ if __name__ == "__main__":
     print(" QUBO FORENSICS: THE WIDER STORY ".center(120, "="))
     print("="*120)
     
-    # Formulate using the optimized Hybrid configuration
+    # Formulate using the optimized
     f = QuboFormulator(
-        formulation="dc_ptdf", encoding="hybrid", mw_precision=10.0,
+        formulation="dc_ptdf", encoding="unary", mw_precision=10.0,
         scale_line_constraints=True, smart_slack_side=True, ptdf_rel_threshold=0.05
     )
     bqm, cx = f._formulate_qubo(net)

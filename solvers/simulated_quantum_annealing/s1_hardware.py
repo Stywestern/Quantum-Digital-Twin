@@ -15,9 +15,9 @@ from pathlib import Path
 
 import networkx as nx
 import numpy as np
+import os
 
 KB_OVER_H_GHZ_PER_K = 20.8366   # k_B / h expressed in GHz per Kelvin
-
 
 @dataclass
 class Hardware:
@@ -91,11 +91,19 @@ class Schedule:
     is_placeholder: bool = False
 
     @classmethod
-    def from_csv(cls, path) -> "Schedule":
+    def from_csv(cls, path: str = "/home/stywestern/Quantum_Digital_Twin/solvers/simulated_quantum_annealing/standart_annealing_schedule_Ad2Sys1.csv") -> "Schedule":
         """CSV from D-Wave's docs (QPU-specific anneal schedule): columns s, A(s), B(s), ...
-        One header row is skipped."""
-        arr = np.loadtxt(path, delimiter=",", skiprows=1, usecols=(0, 1, 2))
-        return cls(s=arr[:, 0], A=arr[:, 1], B=arr[:, 2])
+        One header row is skipped. Falls back to placeholder if the file is not found."""
+        if os.path.exists(path):
+            try:
+                arr = np.loadtxt(path, delimiter=",", skiprows=1, usecols=(0, 1, 2))
+                return cls(s=arr[:, 0], A=arr[:, 1], B=arr[:, 2])
+            except Exception as e:
+                warnings.warn(f"Error reading {path}: {e}. Falling back to placeholder schedule.")
+        else:
+            warnings.warn(f"Schedule file not found at '{path}'. Using PLACEHOLDER annealing schedule.")
+        
+        return cls.placeholder()
 
     @classmethod
     def placeholder(cls) -> "Schedule":
@@ -165,7 +173,7 @@ if __name__ == "__main__":
 
     print("\n=== Testing Thermodynamic Physics ===")
     # 5. Test the effective beta calculation using the placeholder B value
-    temp_mk = 15.0  # 15 millikelvin fridge
+    temp_mk = 12.0  # 12 millikelvin fridge
     beta = beta_eff(B_ghz=b_ph, temperature_mk=temp_mk)
     print(f"[+] Effective beta at {temp_mk} mK and B(s)={b_ph:.3f} GHz : {beta:.4f}")
 

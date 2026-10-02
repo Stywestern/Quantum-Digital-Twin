@@ -6,7 +6,7 @@ from solvers.qubo_formulator import QuboFormulator
 
 from solvers.simulated_quantum_annealing.s1_hardware import Hardware
 from solvers.simulated_quantum_annealing.s1b_embedding import find_embeddings, select_best
-from solvers.simulated_quantum_annealing.s4_emulators import EmulatedQPU
+from solvers.simulated_quantum_annealing.s5_emulators import EmulatedQPU
 
 class EmulatedQPUSolver(QuboFormulator):
     """
@@ -89,7 +89,7 @@ class EmulatedQPUSolver(QuboFormulator):
                 emb_stats = emb_results[best_label]["stats"]
                 embed_time = time.time() - t1
 
-                # 3. Hardware Mapping & Sampling Phase
+                # 3. Hardware Mapping & Sampling Phase (Single Run with postprocess="both")
                 t2 = time.time()
                 
                 sampler_kwargs = {"num_sweeps": self.num_sweeps}
@@ -103,52 +103,50 @@ class EmulatedQPUSolver(QuboFormulator):
                     use_extended_j=self.use_extended_j, seed=self.seed
                 )
                 
-                # --- RUN 1: RAW ANALOG PHYSICS (No Post-Processing) ---
-                # Fix seed to ensure identical noise and path integrals
-                qpu.rng = np.random.default_rng(self.seed) 
-                result_raw = qpu.sample(
+                # Single execution call with "both" (returns final logical postprocessed set, 
+                # and we can retain target_sampleset for raw analog metrics if needed)
+                qpu.rng = np.random.default_rng(self.seed)
+                result = qpu.sample(
                     logical_bqm=bqm, embedding=embedding, num_reads=self.num_reads,
                     reads_per_programming=self.reads_per_programming,
-                    chain_break_method=self.chain_break_method, postprocess=None
-                )
-                
-                # --- RUN 2: ANALOG PHYSICS + STEEPEST DESCENT ---
-                qpu.rng = np.random.default_rng(self.seed) # Reset seed to match Run 1
-                result_sds = qpu.sample(
-                    logical_bqm=bqm, embedding=embedding, num_reads=self.num_reads,
-                    reads_per_programming=self.reads_per_programming,
-                    chain_break_method=self.chain_break_method, postprocess="both"
+                    relative_chain_multiplier=1.0,  # Protects OPF economics from DAC erasure
+                    chain_break_method=self.chain_break_method, 
+                    keep_target=True,               # Keeps raw pre-processed physical sample set
+                    postprocess="both"
                 )
                 samp_time = time.time() - t2
                 
-                # Extract RAW physics metrics
-                energies_raw = result_raw.sampleset.record.energy
-                cbf_array_raw = getattr(result_raw.sampleset.record, 'chain_break_fraction', np.zeros(len(energies_raw)))
+                # Extract chain diagnostics from embedding
+                chain_lens = [len(c) for c in embedding.values()]
+                num_chains = sum(1 for l in chain_lens if l > 1)
+                single_qubit_vars = sum(1 for l in chain_lens if l == 1)
+                mean_chain_len = sum(chain_lens) / len(chain_lens) if chain_lens else 0.0
+                chain_variance = float(np.var(chain_lens)) if chain_lens else 0.0
+
+                # Extract raw vs finalized energy metrics
+                raw_energies = result.target_sampleset.record.energy if result.target_sampleset else result.sampleset.record.energy
+                sds_energies = result.sampleset.record.energy
+                cbf_array = getattr(result.sampleset.record, 'chain_break_fraction', np.zeros(len(sds_energies)))
                 
-                # Extract SDS physics metrics (This is what we decode and keep)
-                energies_sds = result_sds.sampleset.record.energy
-                best_sample = result_sds.sampleset.first.sample
-                cbf_array_sds = getattr(result_sds.sampleset.record, 'chain_break_fraction', np.zeros(len(energies_sds)))
+                best_sample = result.sampleset.first.sample
+                phys_flips, log_flips = result.info.get("postprocess_flips", (0, 0))
                 
-                phys_flips, log_flips = result_sds.info.get("postprocess_flips", (0, 0))
-                
+                raw_best = float(np.min(raw_energies))
+                sds_best = float(np.min(sds_energies))
+
                 sampler_stats = {
                     "num_reads_requested": self.num_reads,
                     "num_sweeps_per_read": self.num_sweeps,
-                    "unique_states_found_sds": len(result_sds.sampleset),
-                    
-                    # Pre-SDS (Raw Analog) Stats
-                    "raw_energy_best_logical": round(float(np.min(energies_raw)), 2),
-                    "raw_energy_mean_logical": round(float(np.mean(energies_raw)), 2),
-                    "raw_chain_break_fraction_mean": round(float(np.mean(cbf_array_raw)), 4),
-                    
-                    # Post-SDS Stats
-                    "sds_energy_best_logical": round(float(np.min(energies_sds)), 2),
-                    "sds_energy_mean_logical": round(float(np.mean(energies_sds)), 2),
-                    "sds_chain_break_fraction_mean": round(float(np.mean(cbf_array_sds)), 4),
-                    
+                    "unique_states_found": len(result.sampleset),
+                    "raw_energy_best_logical": round(raw_best, 2),
+                    "raw_energy_mean_logical": round(float(np.mean(raw_energies)), 2),
+                    "sds_energy_best_logical": round(sds_best, 2),
+                    "sds_energy_mean_logical": round(float(np.mean(sds_energies)), 2),
+                    "energy_improvement_delta": round(raw_best - sds_best, 2),
+                    "mean_chain_break_fraction": round(float(np.mean(cbf_array)), 4),
                     "postprocess_physical_flips": int(phys_flips),
-                    "postprocess_logical_flips": int(log_flips)
+                    "postprocess_logical_flips": int(log_flips),
+                    "total_flips_executed": int(phys_flips + log_flips)
                 }
                 
                 hw_metrics = {
@@ -158,15 +156,21 @@ class EmulatedQPUSolver(QuboFormulator):
                     "physical_qubits": emb_stats['physical'],
                     "qubit_overhead_factor": round(emb_stats['physical'] / logical_vars, 2) if logical_vars else 0,
                     "max_chain_length": emb_stats['max_chain'],
+                    "mean_chain_length": round(mean_chain_len, 2),
+                    "chain_length_variance": round(chain_variance, 4),
+                    "multi_qubit_chains": num_chains,
+                    "single_qubit_variables": single_qubit_vars,
+                    "total_chain_qubits": sum(chain_lens),
                     "embedding_heuristic_winner": best_label,
-                    "hardware_scale_factor": result_sds.scale_factor,
-                    "chain_strength_applied": result_sds.chain_strength,
+                    "hardware_scale_factor": result.scale_factor,
+                    "chain_strength_applied": result.chain_strength,
                     "dac_resolution_bits": self.dac_bits,
+                    "dac_step_granularity": round(1.0 / (2 ** self.dac_bits), 5),
                     "ice_sigma_h": self.ice_sigma_h,
                     "ice_sigma_j": self.ice_sigma_j
                 }
 
-                # 4. Decoding Phase (Decoding the SDS optimized state)
+                # 4. Decoding Phase
                 dispatch, sgen_dispatch, slack_dispatch, cost, feasibility = self._decode_solution(best_sample, net)
             
         except Exception as e:

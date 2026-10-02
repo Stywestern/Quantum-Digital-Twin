@@ -92,10 +92,10 @@
             "status": "Success",
             "solver_name": "emulated_qpu_sa_dc_ptdf",
             "execution_time_seconds": {
-                "total": 2.5372,
-                "formulation_cpu": 0.0022,
-                "embedding_cpu": 0.5937,
-                "sampling_analog_sim": 1.9407
+                "total": 2.6499,
+                "formulation_cpu": 0.0031,
+                "embedding_cpu": 0.6433,
+                "sampling_analog_sim": 2.0027
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",

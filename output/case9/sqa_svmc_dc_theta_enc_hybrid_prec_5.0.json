@@ -32,31 +32,31 @@
     },
     "opf_results": {
         "solution": {
-            "cost_eur_per_hr": 5321.562,
+            "cost_eur_per_hr": 6357.562,
             "generator_dispatch_mw": {
                 "0": {
-                    "p_mw": 110.0
+                    "p_mw": 100.0
                 },
                 "1": {
-                    "p_mw": 115.0
+                    "p_mw": 175.0
                 }
             },
             "static_generator_dispatch_mw": {},
             "slack_dispatch_mw": {
                 "0": {
-                    "p_mw": 90.0
+                    "p_mw": 40.0
                 }
             },
             "grid_state": {
-                "max_line_loading_percent": 44.0,
+                "max_line_loading_percent": 62.421,
                 "max_voltage_pu": null,
                 "min_voltage_pu": null,
                 "feasibility": {
                     "total_generation_mw": 315.0,
                     "total_load_mw": 315.0,
-                    "raw_imbalance_mw": -15.0,
-                    "raw_slack_dispatch_mw": 75.0,
-                    "cost_raw_dispatch_eur": 4974.312,
+                    "raw_imbalance_mw": 10.0,
+                    "raw_slack_dispatch_mw": 50.0,
+                    "cost_raw_dispatch_eur": 6506.562,
                     "max_line_violation_mw": 0.0,
                     "tolerance_mw": 5.0,
                     "balance_ok": false,
@@ -64,39 +64,39 @@
                     "bounds_ok": true,
                     "is_feasible": false,
                     "line_flows_mw": {
-                        "line_0": 90.0,
-                        "line_1": 29.664,
-                        "line_2": -60.336,
-                        "line_3": 115.0,
-                        "line_4": 54.664,
-                        "line_5": -45.336,
-                        "line_6": -110.0,
-                        "line_7": 64.664,
-                        "line_8": -60.336
+                        "line_0": 40.0,
+                        "line_1": -3.632,
+                        "line_2": -93.632,
+                        "line_3": 175.0,
+                        "line_4": 81.368,
+                        "line_5": -18.632,
+                        "line_6": -100.0,
+                        "line_7": 81.368,
+                        "line_8": -43.632
                     },
                     "bus_angles_rad": {
                         "0": 0.0,
-                        "1": 0.069733,
-                        "2": 0.090831,
-                        "3": -0.05184,
-                        "4": -0.079131,
-                        "5": 0.023441,
-                        "6": -0.03166,
-                        "7": 0.000983,
-                        "8": -0.103126
+                        "1": 0.133374,
+                        "2": 0.242027,
+                        "3": -0.02304,
+                        "4": -0.019698,
+                        "5": 0.139477,
+                        "6": 0.057459,
+                        "7": 0.070874,
+                        "8": -0.060128
                     },
-                    "max_nodal_mismatch_mw": 15.747
+                    "max_nodal_mismatch_mw": 5.658
                 }
             }
         },
         "metadata": {
             "status": "Success",
-            "solver_name": "emulated_qpu_sa_dc_theta",
+            "solver_name": "emulated_qpu_svmc_dc_theta",
             "execution_time_seconds": {
-                "total": 347.7557,
-                "formulation_cpu": 0.0145,
-                "embedding_cpu": 260.7319,
-                "sampling_analog_sim": 86.9966
+                "total": 878.2852,
+                "formulation_cpu": 0.0162,
+                "embedding_cpu": 262.4824,
+                "sampling_analog_sim": 615.7719
             },
             "problem_complexity": {
                 "formulation": "dc_theta",
@@ -174,14 +174,14 @@
                     "num_reads_requested": 500,
                     "num_sweeps_per_read": 3000,
                     "unique_states_found_sds": 500,
-                    "raw_energy_best_logical": 7172293.74,
-                    "raw_energy_mean_logical": 101034853.27,
-                    "raw_chain_break_fraction_mean": 0.0251,
-                    "sds_energy_best_logical": 17391.81,
-                    "sds_energy_mean_logical": 1217403.65,
-                    "sds_chain_break_fraction_mean": 0.0253,
-                    "postprocess_physical_flips": 594,
-                    "postprocess_logical_flips": 29582
+                    "raw_energy_best_logical": 13628838.65,
+                    "raw_energy_mean_logical": 112054361.45,
+                    "raw_chain_break_fraction_mean": 0.0281,
+                    "sds_energy_best_logical": 8942.27,
+                    "sds_energy_mean_logical": 1446473.99,
+                    "sds_chain_break_fraction_mean": 0.0286,
+                    "postprocess_physical_flips": 701,
+                    "postprocess_logical_flips": 30294
                 }
             }
         }
