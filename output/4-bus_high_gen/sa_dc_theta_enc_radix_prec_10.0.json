@@ -36,10 +36,10 @@
             "cost_eur_per_hr": 3200.0,
             "generator_dispatch_mw": {
                 "0": {
-                    "p_mw": 20.0
+                    "p_mw": 0.0
                 },
                 "1": {
-                    "p_mw": 70.0
+                    "p_mw": 80.0
                 },
                 "2": {
                     "p_mw": 80.0
@@ -48,18 +48,18 @@
             "static_generator_dispatch_mw": {},
             "slack_dispatch_mw": {
                 "0": {
-                    "p_mw": 10.0
+                    "p_mw": 20.0
                 }
             },
             "grid_state": {
-                "max_line_loading_percent": 16.735,
+                "max_line_loading_percent": 33.47,
                 "max_voltage_pu": null,
                 "min_voltage_pu": null,
                 "feasibility": {
                     "total_generation_mw": 180.0,
                     "total_load_mw": 180.0,
                     "raw_imbalance_mw": -10.0,
-                    "raw_slack_dispatch_mw": 0.0,
+                    "raw_slack_dispatch_mw": 10.0,
                     "cost_raw_dispatch_eur": 2800.0,
                     "max_line_violation_mw": 0.0,
                     "tolerance_mw": 10.0,
@@ -68,15 +68,15 @@
                     "bounds_ok": true,
                     "is_feasible": true,
                     "line_flows_mw": {
-                        "line_0": 10.0,
-                        "line_1": -10.0,
+                        "line_0": 20.0,
+                        "line_1": -20.0,
                         "line_2": 0.0,
                         "line_3": 0.0,
                         "line_4": 0.0
                     },
                     "bus_angles_rad": {
                         "0": 0.0,
-                        "1": -0.00189,
+                        "1": -0.003781,
                         "2": 0.0,
                         "3": 0.0
                     },
@@ -88,9 +88,9 @@
             "status": "Success",
             "solver_name": "neal_simulated_annealing_dc_theta",
             "execution_time_seconds": {
-                "total": 1.4582,
-                "formulation_cpu": 0.0034,
-                "sampling_cpu_sa": 1.4544
+                "total": 2.6551,
+                "formulation_cpu": 0.0039,
+                "sampling_cpu_sa": 2.6382
             },
             "problem_complexity": {
                 "formulation": "dc_theta",
@@ -143,12 +143,15 @@
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
+                    "num_sweeps_per_read": 5000,
                     "unique_states_found": 500,
                     "energy_best": 3010.61,
-                    "energy_mean": 4592.07,
-                    "energy_worst": 8918.48,
-                    "energy_std_dev": 837.88
+                    "energy_mean": 4530.83,
+                    "energy_worst": 8456.96,
+                    "energy_std_dev": 825.04,
+                    "reads_checked_for_feasibility": 1,
+                    "feasible_read_found": true,
+                    "chosen_sample_energy": 3010.6088151786244
                 }
             },
             "hardware_metrics": {

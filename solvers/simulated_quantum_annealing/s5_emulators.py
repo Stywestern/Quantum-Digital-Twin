@@ -27,7 +27,7 @@ class EmulationResult:
 
 
 class EmulatedQPU:
-    def __init__(self, hardware: Hardware, schedule: Schedule, sampler: str = "sa",
+    def __init__(self, hardware: Hardware, schedule: Schedule | None = None, sampler: str = "sa",
                  sampler_kwargs: dict | None = None, dac_bits: int | None = 5,
                  ice_sigma_h: float = 0.02, ice_sigma_j: float = 0.01,
                  use_extended_j: bool = True, seed: int = 0):
@@ -36,9 +36,8 @@ class EmulatedQPU:
         against real QPU runs; do not read physical meaning into them yet.
         use_extended_j : allow chain couplers (strongly negative J) to use the extended J range.
         """
-
         self.hw = hardware
-        self.schedule = schedule
+        self.schedule = Schedule.from_csv("/home/stywestern/Quantum_Digital_Twin/solvers/simulated_quantum_annealing/standart_annealing_schedule_Ad2Sys1.csv")
         self.sampler_name = sampler
         self.sampler = make_sampler(sampler, self.schedule, hardware.temperature_mk, **(sampler_kwargs or {}))
         self.dac_bits, self.sigma_h, self.sigma_j = dac_bits, ice_sigma_h, ice_sigma_j
@@ -49,58 +48,79 @@ class EmulatedQPU:
         return {"majority": majority_vote, "discard": discard, "weighted": weighted_random,
                 "minimize_energy": MinimizeEnergy(logical_spin, embedding)}[name]
 
+    @staticmethod
+    def _local_chain_cap(logical_spin: dimod.BinaryQuadraticModel, embedding: dict,
+                         relative_chain_multiplier: float) -> dict:
+        """Per-variable cap = relative_chain_multiplier * (sum of |coupling| on edges actually
+        incident to that logical variable). A chain only needs to outlast the pull it is actually
+        under, so this is anchored locally rather than to the single worst coefficient anywhere in
+        the whole problem (which earlier under- or over-constrained every OTHER chain at once)."""
+        incident = {v: 0.0 for v in logical_spin.variables}
+        for u, v, bias in logical_spin.iter_quadratic():
+            incident[u] += abs(bias)
+            incident[v] += abs(bias)
+        return {v: relative_chain_multiplier * incident[v] for v in embedding}
+
     def sample(self, logical_bqm: dimod.BinaryQuadraticModel, embedding: dict,
                chain_strength: float | None = None, prefactor: float = 1.414,
-               relative_chain_multiplier: float | None = 1,
+               relative_chain_multiplier: float | None = None,
                num_reads: int = 1000, reads_per_programming: int = 100,
                chain_break_method: str = "majority", keep_target: bool = False,
                postprocess: str | None = "both") -> EmulationResult:
         """
-        relative_chain_multiplier : If provided, caps the calculated chain strength at this
-                                    multiplier times the maximum logical problem weight.
-                                    e.g., 1.0 means chains are exactly as strong as the max constraint.
+        relative_chain_multiplier : if given, caps each logical variable's chain strength at this
+                                    multiplier times the TOTAL |coupling| actually incident to that
+                                    variable (not the global max coefficient -- a chain only has to
+                                    outlast the pull it is actually subject to, and a global cap
+                                    either does nothing for most chains or starves the busiest ones).
+                                    1.0 means a chain is exactly as strong as everything pulling on
+                                    it combined. Per-variable: embed_bqm accepts a dict chain_strength.
         reads_per_programming : the ICE noise realisation is redrawn every this many reads, mimicking
                                 re-programming of the device between batches.
-        postprocess : None (default) | "physical" | "logical" | "both". Greedy steepest descent.
+        postprocess : None (default) | "physical" | "logical" | "both". Greedy steepest descent, run
+                      against the SAME (possibly capped) Hamiltonian that was sampled and scored --
+                      not a separate, uncapped one -- so a post-processing step can never reverse the
+                      cap or optimize against an objective different from the one being reported.
                       "physical": on the embedded problem, before chain resolution.
                       "logical" : on the logical problem after chain resolution.
         """
         if postprocess not in (None, "physical", "logical", "both"):
             raise ValueError("postprocess must be None, 'physical', 'logical' or 'both'")
-            
         logical_spin = logical_bqm.change_vartype(dimod.SPIN, inplace=False)
-        
-        # --- Capped Chain Strength Logic ---
+        raw_cs = None                                  # uncapped uniform-torque-compensation value, if computed
         if chain_strength is None:
             raw_cs = float(uniform_torque_compensation(logical_spin, embedding=embedding, prefactor=prefactor))
-            
             if relative_chain_multiplier is not None:
-                max_logical_weight = max(
-                    max((abs(v) for v in logical_spin.linear.values()), default=0.0),
-                    max((abs(v) for v in logical_spin.quadratic.values()), default=0.0)
-                )
-                capped_cs = float(max_logical_weight * relative_chain_multiplier)
-                chain_strength = min(raw_cs, capped_cs)
+                cap = self._local_chain_cap(logical_spin, embedding, relative_chain_multiplier)
+                chain_strength = {v: min(raw_cs, c) for v, c in cap.items()}
             else:
                 chain_strength = raw_cs
-        else:
-            raw_cs = chain_strength # Fallback if user explicitly provided a chain_strength
-        # ---------------------------------------------
 
-        # 1A) The QPU Matrix (Capped): For scaling and hardware sampling
-        embedded_qpu = embed_bqm(logical_spin, embedding, self.hw.graph, chain_strength=chain_strength)
-        ideal_qpu = IsingArrays.from_bqm(embedded_qpu)
+        # 1) embed: chain couplers = -chain_strength, biases spread over chains. ONE Hamiltonian from
+        # here on -- the same embedded model is sampled, post-processed, and scored, so nothing can
+        # silently optimize against a different objective than the one being reported.
+        embedded = embed_bqm(logical_spin, embedding, self.hw.graph, chain_strength=chain_strength)
+        ideal = IsingArrays.from_bqm(embedded)
 
-        # 1B) The Healing Matrix (Uncapped): For the physical post-processor
-        embedded_healing = embed_bqm(logical_spin, embedding, self.hw.graph, chain_strength=raw_cs)
-        ideal_healing = IsingArrays.from_bqm(embedded_healing)
+        # which entries of ideal.J are chain couplers (both endpoints in the SAME logical variable's
+        # chain) vs. ordinary problem couplings (endpoints in different chains). embed_bqm adds a
+        # -chain_strength coupling for every hardware edge inside a chain, so "same chain" <=> "chain
+        # edge" exactly -- no need to inspect embed_bqm's internals to get this right.
+        qubit_to_var = {q: v for v, chain in embedding.items() for q in chain}
+        owner = np.array([qubit_to_var[lbl] for lbl in ideal.labels], dtype=object)
+        is_chain = owner[ideal.rows] == owner[ideal.cols]
 
-        # 2) Map to device: Scale the QPU MATRIX (Preserves DAC dynamic range!)
-        j_range = self.hw.extended_j_range if self.use_extended_j else self.hw.j_range
-        scaled, factor = scale_to_hardware(ideal_qpu, self.hw.h_range, j_range)
-        programmed = quantise(scaled, self.hw.h_range, j_range, self.dac_bits)
+        # 2) map to device: scale, quantise. Only CHAIN couplers get the extended J range on real
+        # hardware; ordinary problem couplings are confined to the narrower j_range even when the
+        # device supports extended_j_range. Treating all J alike (as an earlier version did) lets
+        # ordinary couplings claim headroom hardware would never give them.
+        chain_j_range = self.hw.extended_j_range if self.use_extended_j else self.hw.j_range
+        scaled, factor = scale_to_hardware(ideal, self.hw.h_range, self.hw.j_range,
+                                           is_chain=is_chain, chain_j_range=chain_j_range)
+        programmed = quantise(scaled, self.hw.h_range, self.hw.j_range, self.dac_bits,
+                              is_chain=is_chain, chain_j_range=chain_j_range)
 
-        # 3) Sample, redrawing control noise for each programming cycle
+        # 3) sample, redrawing control noise for each programming cycle
         batches, done = [], 0
         while done < num_reads:
             r = min(reads_per_programming, num_reads - done)
@@ -110,34 +130,39 @@ class EmulatedQPU:
         samples = np.vstack(batches)
 
         flips_phys = flips_log = 0
-        
-        # 4) Physical Post-Processing: Feed it the HEALING matrix to force chain repair
         if postprocess in ("physical", "both"):
-            samples, flips_phys = steepest_descent(ideal_healing, samples) 
+            samples, flips_phys = steepest_descent(ideal, samples)
 
-        # Energies are reported w.r.t. the CAPPED embedded model (what you actually submitted to QPU)
-        energies = embedded_qpu.energies((samples, ideal_qpu.labels))
-        target = dimod.SampleSet.from_samples((samples, ideal_qpu.labels), energy=energies, vartype=dimod.SPIN)
+        # energies are reported w.r.t. the SAME embedded model that was sampled and postprocessed
+        # (the capped one, if a cap was applied) -- never a different, uncapped stand-in
+        energies = embedded.energies((samples, ideal.labels))
+        target = dimod.SampleSet.from_samples((samples, ideal.labels), energy=energies, vartype=dimod.SPIN)
 
-        # 5) Resolve chains -> logical samples
+        # 4) resolve chains -> logical samples
         method = self._chain_break_method(chain_break_method, logical_spin, embedding)
         logical = unembed_sampleset(target, embedding, logical_spin,
                                     chain_break_method=method, chain_break_fraction=True)
-                                    
-        # 6) Logical post-processing (fine-tunes the resolved economic variables)
         if postprocess in ("logical", "both"):
             logical, flips_log = descend_sampleset(logical, logical_spin)
-            
         logical = logical.change_vartype(dimod.BINARY, inplace=False)
 
+        capped = isinstance(chain_strength, dict)
         info = {"sampler": self.sampler_name, "dac_bits": self.dac_bits, "sigma_h": self.sigma_h,
                 "sigma_j": self.sigma_j, "num_reads": num_reads,
                 "reads_per_programming": reads_per_programming,
                 "chain_break_method": chain_break_method,
                 "postprocess": postprocess, "postprocess_flips": (flips_phys, flips_log),
-                "placeholder_schedule": self.schedule.is_placeholder}
-                
-        return EmulationResult(logical, chain_strength, factor, embedding_stats(embedding),
+                "placeholder_schedule": self.schedule.is_placeholder,
+                "chain_strength_capped": capped,
+                # when capped, chain_strength varies per logical variable -- report the range so a
+                # single-number summary doesn't hide that some chains were constrained more than others
+                "chain_strength_range": ((min(chain_strength.values()), max(chain_strength.values()))
+                                         if capped else (chain_strength, chain_strength))}
+        # EmulationResult.chain_strength stays a single float for backward-compat summaries (e.g.
+        # scan_chain_strength): the raw uncapped uniform-torque-compensation value if we computed one
+        # (auto chain strength, capped or not), otherwise whatever the caller passed in directly.
+        reported_cs = raw_cs if raw_cs is not None else chain_strength
+        return EmulationResult(logical, reported_cs, factor, embedding_stats(embedding),
                                target if keep_target else None, info)
 
 

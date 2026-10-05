@@ -34,16 +34,16 @@
     },
     "opf_results": {
         "solution": {
-            "cost_eur_per_hr": 17310.0,
+            "cost_eur_per_hr": 17370.0,
             "generator_dispatch_mw": {
                 "0": {
-                    "p_mw": 40.0
+                    "p_mw": 30.0
                 },
                 "1": {
-                    "p_mw": 240.0
+                    "p_mw": 200.0
                 },
                 "2": {
-                    "p_mw": 500.0
+                    "p_mw": 520.0
                 }
             },
             "static_generator_dispatch_mw": {
@@ -53,39 +53,39 @@
             },
             "slack_dispatch_mw": {
                 "0": {
-                    "p_mw": 50.0
+                    "p_mw": 80.0
                 }
             },
             "grid_state": {
-                "max_line_loading_percent": 101.155,
+                "max_line_loading_percent": 100.965,
                 "max_voltage_pu": null,
                 "min_voltage_pu": null,
                 "feasibility": {
                     "total_generation_mw": 1000.0,
                     "total_load_mw": 1000.0,
                     "raw_imbalance_mw": 0.0,
-                    "raw_slack_dispatch_mw": 50.0,
-                    "cost_raw_dispatch_eur": 17310.0,
-                    "max_line_violation_mw": 2.772,
+                    "raw_slack_dispatch_mw": 80.0,
+                    "cost_raw_dispatch_eur": 17370.0,
+                    "max_line_violation_mw": 2.315,
                     "tolerance_mw": 10.0,
                     "balance_ok": true,
                     "lines_ok": true,
                     "bounds_ok": true,
                     "is_feasible": true,
                     "line_flows_mw": {
-                        "line_0": 284.199,
-                        "line_1": 183.029,
-                        "line_2": -257.228,
-                        "line_3": -15.801,
-                        "line_4": -75.801,
-                        "line_5": -242.772
+                        "line_0": 299.41,
+                        "line_1": 178.275,
+                        "line_2": -277.685,
+                        "line_3": -0.59,
+                        "line_4": -100.59,
+                        "line_5": -242.315
                     },
                     "bus_angles_rad": {
-                        "0": 0.055641,
-                        "1": -0.024219,
-                        "2": -0.022513,
+                        "0": 0.054196,
+                        "1": -0.029939,
+                        "2": -0.029875,
                         "3": 0.0,
-                        "4": 0.072103
+                        "4": 0.071967
                     }
                 }
             }
@@ -94,9 +94,9 @@
             "status": "Success",
             "solver_name": "neal_simulated_annealing_dc_ptdf",
             "execution_time_seconds": {
-                "total": 1.0047,
-                "formulation_cpu": 0.0039,
-                "sampling_cpu_sa": 1.0003
+                "total": 1.7629,
+                "formulation_cpu": 0.0041,
+                "sampling_cpu_sa": 1.7497
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -150,12 +150,15 @@
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
+                    "num_sweeps_per_read": 5000,
                     "unique_states_found": 500,
-                    "energy_best": 17429.84,
-                    "energy_mean": 20450.59,
-                    "energy_worst": 27935.03,
-                    "energy_std_dev": 2137.77
+                    "energy_best": 17453.55,
+                    "energy_mean": 20481.55,
+                    "energy_worst": 27575.34,
+                    "energy_std_dev": 2117.41,
+                    "reads_checked_for_feasibility": 1,
+                    "feasible_read_found": true,
+                    "chosen_sample_energy": 17453.55277023767
                 }
             },
             "hardware_metrics": {

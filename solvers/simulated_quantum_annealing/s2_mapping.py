@@ -56,24 +56,47 @@ def _limit(values: np.ndarray, lo: float, hi: float) -> float:
     return f
 
 
-def scale_to_hardware(ar: IsingArrays, h_range, j_range):
-    """Multiply everything by one factor so that the tightest range is exactly filled.
-    Ordering of energies is unchanged (only the overall scale). Returns (scaled, factor)."""
-    f = min(_limit(ar.h, *h_range), _limit(ar.J, *j_range))
+def scale_to_hardware(ar: IsingArrays, h_range, j_range, is_chain: np.ndarray | None = None,
+                      chain_j_range=None):
+    """Multiply everything by ONE factor (a real device applies a single global scale, not a
+    per-coefficient one) so that the tightest of: h vs h_range, non-chain J vs j_range, and chain J
+    vs chain_j_range (defaults to j_range) is exactly filled. Ordering of energies is unchanged.
+
+    is_chain: boolean mask over ar.J, True where that coupler is a chain (intra-logical-variable)
+    coupling. Without it every J is treated as a regular problem coupling. Real annealers give chain
+    couplers access to an EXTENDED J range (e.g. [-2, 1] vs [-1, 1]) that ordinary problem couplings
+    may NOT use; applying the extended range to everything (as an earlier version of this function
+    did) lets ordinary couplings claim headroom they would not actually have on hardware, which
+    understates precision loss. Returns (scaled, factor)."""
+    if chain_j_range is None:
+        chain_j_range = j_range
+    if is_chain is None:
+        is_chain = np.zeros(ar.J.shape, dtype=bool)
+    f = min(_limit(ar.h, *h_range), _limit(ar.J[~is_chain], *j_range),
+           _limit(ar.J[is_chain], *chain_j_range))
     if not np.isfinite(f):
         f = 1.0
     return ar.with_values(h=ar.h * f, J=ar.J * f), float(f)
 
 
-def quantise(ar: IsingArrays, h_range, j_range, bits: int | None):
+def quantise(ar: IsingArrays, h_range, j_range, bits: int | None, is_chain: np.ndarray | None = None,
+            chain_j_range=None):
     """Round to a uniform grid with 2**bits levels across each range. bits=None -> no quantisation.
-    Crude model of finite DAC precision (real devices are not exactly uniform)."""
+    Crude model of finite DAC precision (real devices are not exactly uniform). is_chain/chain_j_range:
+    see scale_to_hardware -- chain couplers are quantised against their own (wider) range."""
     if bits is None:
         return ar
     def q(x, lo, hi):
         step = (hi - lo) / (2 ** bits)
         return np.round(x / step) * step
-    return ar.with_values(h=q(ar.h, *h_range), J=q(ar.J, *j_range))
+    if chain_j_range is None:
+        chain_j_range = j_range
+    if is_chain is None:
+        is_chain = np.zeros(ar.J.shape, dtype=bool)
+    J = np.empty_like(ar.J)
+    J[~is_chain] = q(ar.J[~is_chain], *j_range)
+    J[is_chain] = q(ar.J[is_chain], *chain_j_range)
+    return ar.with_values(h=q(ar.h, *h_range), J=J)
 
 
 def add_ice_noise(ar: IsingArrays, sigma_h: float, sigma_j: float, rng: np.random.Generator):

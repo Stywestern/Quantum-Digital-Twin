@@ -74,12 +74,12 @@
             }
         },
         "metadata": {
-            "status": "Success",
+            "status": "Infeasible: no feasible sample among 500 decoded reads (best violation: balance=True, lines=False, bounds=False)",
             "solver_name": "neal_simulated_annealing_dc_theta",
             "execution_time_seconds": {
-                "total": 0.3203,
-                "formulation_cpu": 0.0025,
-                "sampling_cpu_sa": 0.3173
+                "total": 0.5517,
+                "formulation_cpu": 0.0024,
+                "sampling_cpu_sa": 0.5142
             },
             "problem_complexity": {
                 "formulation": "dc_theta",
@@ -130,12 +130,15 @@
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
+                    "num_sweeps_per_read": 5000,
                     "unique_states_found": 500,
                     "energy_best": 3539.49,
-                    "energy_mean": 4116.79,
-                    "energy_worst": 14791.44,
-                    "energy_std_dev": 985.88
+                    "energy_mean": 4087.49,
+                    "energy_worst": 6057.47,
+                    "energy_std_dev": 856.37,
+                    "reads_checked_for_feasibility": 500,
+                    "feasible_read_found": false,
+                    "chosen_sample_energy": 3539.487789746985
                 }
             },
             "hardware_metrics": {

@@ -256,12 +256,12 @@ def run_pipeline(formulator_config, pristine_net, num_reads=500, num_sweeps=2000
 
 if __name__ == "__main__":
     default_config = {
-        "formulation": "dc_theta",
+        "formulation": "dc_ptdf",
         "encoding": "radix",
         "mw_precision": 10.0, 
     }
 
-    num_reads = 300
-    num_sweeps = 5000
+    num_reads = 1000
+    num_sweeps = 10000
 
     run_pipeline(default_config, pn.case5(), num_reads=num_reads, num_sweeps=num_sweeps)

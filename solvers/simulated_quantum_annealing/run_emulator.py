@@ -115,6 +115,37 @@ class EmulatedQPUSolver(QuboFormulator):
                     postprocess="both"
                 )
                 samp_time = time.time() - t2
+
+                # 4. Decoding Phase: scan the sampleset for the first (lowest-energy)
+                decoded = list(result.sampleset.data(
+                    ["sample", "energy", "num_occurrences", "chain_break_fraction"], sorted_by="energy"))
+
+                best_feasible, best_any, n_infeasible = None, None, 0
+                for d in decoded:
+                    disp, sgen_disp, slack_disp, c, feas = self._decode_solution(dict(d.sample), net)
+                    row = {"dispatch": disp, "sgen_dispatch": sgen_disp, "slack_dispatch": slack_disp,
+                        "cost": c, "feasibility": feas, "qubo_energy": float(d.energy)}
+                    if best_any is None:
+                        best_any = row
+                    if feas["is_feasible"]:
+                        best_feasible = row
+                        break
+                    n_infeasible += 1
+
+                checked = n_infeasible + (1 if best_feasible else 0)
+                if best_feasible is not None:
+                    chosen, status = best_feasible, "Success"
+                else:
+                    chosen = best_any
+                    status = (f"Infeasible: no feasible sample among {checked} decoded reads "
+                            f"(best violation: balance={not chosen['feasibility']['balance_ok']}, "
+                            f"lines={not chosen['feasibility']['lines_ok']}, "
+                            f"bounds={not chosen['feasibility']['bounds_ok']})")
+
+                dispatch, sgen_dispatch = chosen["dispatch"], chosen["sgen_dispatch"]
+                slack_dispatch, cost, feasibility = chosen["slack_dispatch"], chosen["cost"], chosen["feasibility"]
+                sampler_stats["reads_checked_for_feasibility"] = checked
+                sampler_stats["feasible_read_found"] = best_feasible is not None
                 
                 # Extract chain diagnostics from embedding
                 chain_lens = [len(c) for c in embedding.values()]
@@ -227,3 +258,40 @@ class EmulatedQPUSolver(QuboFormulator):
         }
         
         return solution, metadata
+
+
+# =========================================================================
+# Execution Block: Submodule Self-Test (EmulatedQPUSolver SAFreezeout)
+# =========================================================================
+if __name__ == "__main__":
+    import pandapower.networks as nw
+    
+    print("=== Testing EmulatedQPUSolver (SAFreezeout) on case5 ===")
+    
+    # 1. Load Grid
+    net = nw.case5()
+    if not net.ext_grid.empty:
+        net.ext_grid['min_p_mw'] = 0.0
+        
+    # 2. Configure Solver 
+    # (SAFreezeout defaults: sampler="sa", dac_bits=5)
+    solver = EmulatedQPUSolver(
+        formulation="dc_ptdf",
+        mw_precision=10.0,
+        sampler="sa",
+        num_reads=500,
+        num_sweeps=1000
+    )
+    
+    # 3. Solve
+    solution, metadata = solver.solve_opf(net)
+    
+    # 4. Report
+    print(f"\n[+] Status: {metadata['status']}")
+    if metadata['status'] == 'Success':
+        print(f"    Cost: {solution['cost_eur_per_hr']} EUR/hr")
+        print(f"    Feasible: {solution['grid_state']['feasibility']['is_feasible']}")
+        print(f"    Logical Qubits: {metadata['hardware_metrics']['logical_qubits']}")
+        print(f"    Physical Qubits: {metadata['hardware_metrics']['physical_qubits']}")
+        print(f"    Chain Breaks (Mean): {metadata['algorithmic_metrics']['sampler_stats']['mean_chain_break_fraction']*100:.2f}%")
+        print(f"    Total Flips (SDS): {metadata['algorithmic_metrics']['sampler_stats']['total_flips_executed']}")

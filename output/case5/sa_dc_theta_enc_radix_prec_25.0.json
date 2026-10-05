@@ -34,13 +34,13 @@
     },
     "opf_results": {
         "solution": {
-            "cost_eur_per_hr": 17350.0,
+            "cost_eur_per_hr": 16975.0,
             "generator_dispatch_mw": {
                 "0": {
                     "p_mw": 25.0
                 },
                 "1": {
-                    "p_mw": 25.0
+                    "p_mw": 250.0
                 },
                 "2": {
                     "p_mw": 600.0
@@ -48,46 +48,46 @@
             },
             "static_generator_dispatch_mw": {
                 "0": {
-                    "p_mw": 150.0
+                    "p_mw": 75.0
                 }
             },
             "slack_dispatch_mw": {
                 "0": {
-                    "p_mw": 200.0
+                    "p_mw": 50.0
                 }
             },
             "grid_state": {
-                "max_line_loading_percent": 101.508,
+                "max_line_loading_percent": 104.949,
                 "max_voltage_pu": null,
                 "min_voltage_pu": null,
                 "feasibility": {
                     "total_generation_mw": 1000.0,
                     "total_load_mw": 1000.0,
-                    "raw_imbalance_mw": -50.0,
-                    "raw_slack_dispatch_mw": 150.0,
-                    "cost_raw_dispatch_eur": 15350.0,
-                    "max_line_violation_mw": 3.619,
+                    "raw_imbalance_mw": -25.0,
+                    "raw_slack_dispatch_mw": 25.0,
+                    "cost_raw_dispatch_eur": 15975.0,
+                    "max_line_violation_mw": 11.878,
                     "tolerance_mw": 25.0,
-                    "balance_ok": false,
+                    "balance_ok": true,
                     "lines_ok": true,
                     "bounds_ok": true,
-                    "is_feasible": false,
+                    "is_feasible": true,
                     "line_flows_mw": {
-                        "line_0": 368.399,
-                        "line_1": 162.982,
-                        "line_2": -356.381,
-                        "line_3": 68.399,
-                        "line_4": -206.601,
-                        "line_5": -243.619
+                        "line_0": 275.332,
+                        "line_1": 172.789,
+                        "line_2": -348.122,
+                        "line_3": -24.668,
+                        "line_4": -74.668,
+                        "line_5": -251.878
                     },
                     "bus_angles_rad": {
-                        "0": 0.049547,
-                        "1": -0.053974,
-                        "2": -0.061361,
+                        "0": 0.052528,
+                        "1": -0.02484,
+                        "2": -0.022176,
                         "3": 0.0,
-                        "4": 0.072355
+                        "4": 0.074808
                     },
-                    "max_nodal_mismatch_mw": 17.405
+                    "max_nodal_mismatch_mw": 20.898
                 }
             }
         },
@@ -95,9 +95,9 @@
             "status": "Success",
             "solver_name": "neal_simulated_annealing_dc_theta",
             "execution_time_seconds": {
-                "total": 1.8573,
-                "formulation_cpu": 0.0051,
-                "sampling_cpu_sa": 1.8517
+                "total": 2.9736,
+                "formulation_cpu": 0.004,
+                "sampling_cpu_sa": 2.9566
             },
             "problem_complexity": {
                 "formulation": "dc_theta",
@@ -151,12 +151,15 @@
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
+                    "num_sweeps_per_read": 5000,
                     "unique_states_found": 500,
-                    "energy_best": 16964.85,
-                    "energy_mean": 104069.13,
-                    "energy_worst": 1975666.36,
-                    "energy_std_dev": 206735.39
+                    "energy_best": 17212.61,
+                    "energy_mean": 108221.63,
+                    "energy_worst": 2204163.49,
+                    "energy_std_dev": 235716.81,
+                    "reads_checked_for_feasibility": 1,
+                    "feasible_read_found": true,
+                    "chosen_sample_energy": 17212.606123544276
                 }
             },
             "hardware_metrics": {

@@ -76,10 +76,10 @@
             "status": "Success",
             "solver_name": "emulated_qpu_sa_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.6113,
-                "formulation_cpu": 0.0018,
-                "embedding_cpu": 0.1042,
-                "sampling_analog_sim": 0.5048
+                "total": 0.5249,
+                "formulation_cpu": 0.002,
+                "embedding_cpu": 0.1085,
+                "sampling_analog_sim": 0.409
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -138,10 +138,16 @@
                 "physical_qubits": 10,
                 "qubit_overhead_factor": 1.25,
                 "max_chain_length": 2,
+                "mean_chain_length": 1.25,
+                "chain_length_variance": 0.1875,
+                "multi_qubit_chains": 2,
+                "single_qubit_variables": 6,
+                "total_chain_qubits": 10,
                 "embedding_heuristic_winner": "minorminer_seed0",
                 "hardware_scale_factor": 0.0004166666666666667,
                 "chain_strength_applied": 3642.9371323150776,
                 "dac_resolution_bits": 5,
+                "dac_step_granularity": 0.03125,
                 "ice_sigma_h": 0.01,
                 "ice_sigma_j": 0.01
             },
@@ -149,16 +155,17 @@
                 "framework": "hardware_aware_analog_simulation",
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
-                    "unique_states_found_sds": 500,
+                    "num_sweeps_per_read": 5000,
+                    "unique_states_found": 500,
                     "raw_energy_best_logical": 3268.92,
-                    "raw_energy_mean_logical": 4152.74,
-                    "raw_chain_break_fraction_mean": 0.0,
+                    "raw_energy_mean_logical": 3827.08,
                     "sds_energy_best_logical": 3268.92,
-                    "sds_energy_mean_logical": 3839.31,
-                    "sds_chain_break_fraction_mean": 0.0,
-                    "postprocess_physical_flips": 381,
-                    "postprocess_logical_flips": 64
+                    "sds_energy_mean_logical": 3818.12,
+                    "energy_improvement_delta": -0.0,
+                    "mean_chain_break_fraction": 0.0,
+                    "postprocess_physical_flips": 333,
+                    "postprocess_logical_flips": 16,
+                    "total_flips_executed": 349
                 }
             }
         }

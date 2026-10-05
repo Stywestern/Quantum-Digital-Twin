@@ -27,6 +27,80 @@ def parse_solver_tag(file_name: str, meta: dict) -> str:
     return meta.get("solver_name", "Unknown")
 
 
+def generate_wp2_plots(df: pd.DataFrame, out_dir: str):
+    """Generates analytical visualizations for WP2 reporting."""
+    sns.set_theme(style="whitegrid", context="paper")
+    
+    # 1. Hardware Overhead: Logical vs Physical Qubits (Encoding Comparison)
+    qpu_df = df[df["Solver"].str.startswith("EMU")].copy()
+    if not qpu_df.empty:
+        plt.figure(figsize=(10, 6))
+        
+        # We want to see how encoding impacts the physical footprint on a specific grid
+        overhead_df = qpu_df.groupby(["Grid", "Enc"])[["L-Qub", "P-Qub"]].mean().reset_index()
+        
+        x = np.arange(len(overhead_df["Grid"].unique()))
+        width = 0.35
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        for i, enc in enumerate(["radix", "unary"]):
+            enc_data = overhead_df[overhead_df["Enc"] == enc]
+            if not enc_data.empty:
+                # Plot Logical Qubits
+                ax.bar(x + (i*width) - width/4, enc_data["L-Qub"], width/2, label=f'{enc} (Logical)', color=sns.color_palette("muted")[i], alpha=0.9)
+                # Plot Physical Qubits (Stacked behind to show overhead)
+                ax.bar(x + (i*width) + width/4, enc_data["P-Qub"], width/2, label=f'{enc} (Physical)', color=sns.color_palette("dark")[i], alpha=0.9)
+
+        ax.set_ylabel('Qubit Count')
+        ax.set_title('Hardware Overhead: Logical vs. Embedded Physical Qubits')
+        ax.set_xticks(x + width / 2)
+        ax.set_xticklabels(overhead_df["Grid"].unique())
+        ax.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "wp2_hardware_overhead.png"), dpi=300)
+        plt.close()
+
+    # 2. Analog Noise Impact: Dynamic Range Vulnerability vs. Chain Breaks
+    if not qpu_df.empty:
+        plt.figure(figsize=(8, 6))
+        sns.scatterplot(
+            data=qpu_df, 
+            x="At-Risk (%)", 
+            y="CB (%)", 
+            hue="Grid", 
+            style="Enc", 
+            s=100, 
+            alpha=0.8
+        )
+        plt.title("Analog Degradation: Matrix Squashing vs. Chain Failures")
+        plt.xlabel("Variables At Risk of DAC Erasure (%)")
+        plt.ylabel("Observed Chain Break Fraction (%)")
+        plt.axhline(0, color='grey', lw=1, ls='--')
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "wp2_analog_degradation.png"), dpi=300)
+        plt.close()
+
+    # 3. Solver Accuracy: Optimality Gap comparison
+    compare_df = df[df["Opt-Gap (%)"].notna()].copy()
+    if not compare_df.empty:
+        plt.figure(figsize=(10, 6))
+        sns.barplot(
+            data=compare_df, 
+            x="Grid", 
+            y="Opt-Gap (%)", 
+            hue="Solver", 
+            palette="viridis"
+        )
+        plt.title("Solver Accuracy: Optimality Gap relative to Continuous IP Baseline")
+        plt.ylabel("Cost Deviation from True Minimum (%)")
+        plt.axhline(0, color='red', lw=2, ls='--', label='IP Baseline (0%)')
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "wp2_optimality_gap.png"), dpi=300)
+        plt.close()
+
+
 def aggregate_all_results():
     """Crawls all directories in output/, compiles data, and generates WP2 deliverables."""
     json_files = glob.glob(os.path.join("output", "*", "*.json"))
@@ -115,7 +189,9 @@ def aggregate_all_results():
         # Chain break and risk stats
         sampler_stats = alg.get("sampler_stats", {})
         cb_frac = sampler_stats.get("sds_chain_break_fraction_mean", 
-                  sampler_stats.get("chain_break_fraction_mean", np.nan))
+                  sampler_stats.get("mean_chain_break_fraction", 
+                  sampler_stats.get("chain_break_fraction_mean", np.nan)))
+        
         risk_frac = feas.get("at_risk_fraction", np.nan)
 
         rows.append({
@@ -140,7 +216,10 @@ def aggregate_all_results():
         })
 
     df = pd.DataFrame(rows)
-    
+    if df.empty:
+        print("No valid data parsed.")
+        return
+        
     # Sorting and display ordering
     solver_order = ["Classical IP", "Classical SA", "EMU-SA", "EMU-SVMC", "EMU-SQA"]
     present_solvers = [s for s in solver_order if s in df["Solver"].unique()]
@@ -169,6 +248,10 @@ def aggregate_all_results():
     print("="*160 + "\n")
     
     df.to_csv(os.path.join(out_dir, "master_wp2_results.csv"), index=False)
+    
+    # --- 2. Visual Deliverables for WP2 Report ---
+    generate_wp2_plots(df, out_dir)
+    print(f"Generated analytical plots saved to: {out_dir}")
 
 if __name__ == "__main__":
     aggregate_all_results()

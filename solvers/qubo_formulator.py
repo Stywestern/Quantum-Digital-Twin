@@ -20,17 +20,16 @@ class QuboFormulator():
 
     def __init__(self, formulation="dc", mw_precision=1.0, 
                  angle_precision=None, penalty_balance=None, penalty_line=None,
-                 encoding="radix", penalty_safety=1.0, ptdf_threshold=0.5, feasibility_tol_mw=None, rebalance_slack=True,
+                 encoding="radix", penalty_safety=1.0, ptdf_threshold=0.05, feasibility_tol_mw=None, rebalance_slack=True,
                  scale_line_constraints=True, smart_slack_side=True,
                  slack_precision_factor=1.0, decode_with_full_ptdf=True,
                  ptdf_rel_threshold=None, ptdf_round_to=None, snap_weights=True,
-                 ext_fallback_mult=10.0, risk_noise_frac=0.03125, **kwargs):
+                 ext_fallback_mult=2.0, risk_noise_frac=0.03125, **kwargs):
         """
         formulation         : "dc_ptdf" (default; "dc" is an alias) or "dc_theta".
-        encoding             : "radix", "unary"
+        encoding            : "radix", "unary"
         angle_precision     : dc_theta only.
         penalty_balance/line: None -> auto derived.
-        hybrid_chunk_size    : Size of unary chunks in hybrid encoding (MW).
         scale_line_constraints: Divides line constraints by max PTDF to shrink dynamic range.
         smart_slack_side     : Halves slack bit requirements by bounding strictly.
         ptdf_rel_threshold   : Zero PTDF entries below rel * max|H_l| to sparsify the graph.
@@ -56,7 +55,7 @@ class QuboFormulator():
         self.feasibility_tol_mw = feasibility_tol_mw
         self.rebalance_slack = rebalance_slack
         
-        # New Scaled Parameters
+        # Scaled Parameters
         self.scale_line_constraints = scale_line_constraints
         self.smart_slack_side = smart_slack_side
         self.slack_precision_factor = slack_precision_factor
@@ -93,12 +92,19 @@ class QuboFormulator():
 
     def _asset_bounds(self, net, et, idx):
         row = getattr(net, et).loc[idx]
-        p_min = self._val(row.get('min_p_mw'), 0.0)
         default_max = self._val(row.get('p_mw'), 0.0) if et == 'sgen' else self.DEFAULT_MAX_MW
+
+        p_min = self._val(row.get('min_p_mw'), 0.0)
         p_max = self._val(row.get('max_p_mw'), default_max)
+ 
         if p_max < p_min - 1e-9:
             raise ValueError(f"{et} {idx}: max_p_mw ({p_max}) < min_p_mw ({p_min}); check the limits.")
         return p_min, p_max
+
+
+    # ------------------------------------------------------------------ #
+    # Encoders
+    # ------------------------------------------------------------------ #
 
     def _get_radix_weights(self, total_range, precision):
         if total_range <= 1e-12:
@@ -376,7 +382,7 @@ class QuboFormulator():
         # Store full PTDF
         self._H_full = {ln['idx']: ln['b'] * (X[pos[ln['f']]] - X[pos[ln['t']]]) for ln in self._lines}
         self._H = {}
-        
+
         # Apply Sparsity Thresholding
         for ln in self._lines:
             raw = self._H_full[ln['idx']]
@@ -385,6 +391,20 @@ class QuboFormulator():
             if self.ptdf_round_to:
                 h = np.round(h / self.ptdf_round_to) * self.ptdf_round_to
             self._H[ln['idx']] = h
+
+            if getattr(self, 'decode_with_full_ptdf', False):
+                full_mag = float(np.sum(np.abs(raw)))
+                kept_mag = float(np.sum(np.abs(h)))
+                if full_mag > 1e-9 and (1.0 - kept_mag / full_mag) > 0.3:
+                    dropped_pct = 100.0 * (1.0 - kept_mag / full_mag)
+                    self.cost_model_warnings.append(
+                        f"{ln['idx']}: ptdf_threshold={self.ptdf_threshold} dropped {dropped_pct:.0f}% of "
+                        f"this line's full PTDF magnitude from the QUBO, but decode_with_full_ptdf=True "
+                        f"checks feasibility against the FULL PTDF -- the QUBO's own line-limit penalty "
+                        f"and the lines_ok check it is judged against may disagree structurally for this "
+                        f"line, independent of sampler/hardware effects")
+
+        return
 
     def _compute_angle_bounds(self, net):
         slack = {int(net.ext_grid.at[i, 'bus']) for i in self._active(net, 'ext_grid')}
@@ -765,13 +785,13 @@ class QuboFormulator():
         truncated = getattr(self, '_H', {})
         if getattr(self, 'decode_with_full_ptdf', False) and hasattr(self, '_H_full'):
             self._H = self._H_full
-            
+
         try:
             R = self.var_registry
             raw = {et: {idx: self._decode_value(reg, sample) for idx, reg in R[et].items()} for et in self._DISPATCH_TYPES}
             pos = self._bus_pos
 
-            # --- physical state of the decoded dispatch ---
+            # --- physical state of the decoded dispatch (RAW, pre-rebalance) ---
             inj = np.zeros(len(pos))
             bounds_ok = True
             for et, idx, reg, bus in self._dispatch_assets(net):
@@ -781,13 +801,13 @@ class QuboFormulator():
                 inj[pos[bus]] += val
             for bus, load in self._load_mw.items():
                 inj[pos[bus]] -= load
-            imbalance = float(inj.sum())                                      
-            flows = {idx: float(h @ inj) for idx, h in self._H.items()}   
+            imbalance = float(inj.sum())
+            flows = {idx: float(h @ inj) for idx, h in self._H.items()}
             angles = self._X @ inj
 
             max_line_violation = max([abs(flows[ln['idx']]) - ln['p_max'] for ln in self._lines if ln['p_max'] > 0.0] + [0.0])
 
-            # --- operating point that is reported ---
+            # --- operating point that is reported: reference ext_grid absorbs the imbalance ---
             reported = {et: dict(v) for et, v in raw.items()}
             raw_ref = raw['ext_grid'][self._ref_ext]
             rebalance_ok = True
@@ -796,10 +816,17 @@ class QuboFormulator():
                 reported['ext_grid'][self._ref_ext] = new_ref
                 ref_reg = R['ext_grid'][self._ref_ext]
                 rebalance_ok = ref_reg['min'] - 1e-6 <= new_ref <= ref_reg['max'] + 1e-6
+                
+                ref_bus = int(net.ext_grid.at[self._ref_ext, 'bus'])
+                inj[pos[ref_bus]] += (new_ref - raw_ref)
+                flows = {idx: float(h @ inj) for idx, h in self._H.items()}
+                angles = self._X @ inj
+                max_line_violation = max(
+                    [abs(flows[ln['idx']]) - ln['p_max'] for ln in self._lines if ln['p_max'] > 0.0] + [0.0])
 
             tol = self.feasibility_tol_mw if self.feasibility_tol_mw is not None else self.mw_precision
-            balance_ok = abs(imbalance) <= tol
-            lines_ok = (max_line_violation <= tol)
+            balance_ok = abs(imbalance) <= tol               # unchanged: judges the RAW imbalance, by design
+            lines_ok = (max_line_violation <= tol)            # now judges the REPORTED operating point
 
             cost = self._total_true_cost(reported)
             feasibility = {
@@ -823,9 +850,9 @@ class QuboFormulator():
             dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['gen'].items()}
             sgen_dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['sgen'].items()}
             slack_dispatch = {i: {'p_mw': round(v, 3)} for i, v in reported['ext_grid'].items()}
-            
+
             return dispatch, sgen_dispatch, slack_dispatch, round(cost, 3), feasibility
-            
+
         finally:
             self._H = truncated
 
@@ -955,89 +982,87 @@ class QuboFormulator():
         print(line + "\n")
 
 
-# =========================================================================
-# Execution Block: Deep Dive Coefficient Forensics (case5)
-# =========================================================================
+# ===============================================================================================================
+#                               Execution Block: Formulation Diagnostic
+# ===============================================================================================================
 if __name__ == "__main__":
-    import warnings
-    import numpy as np
-    import pandas as pd
-    import dimod
-    import pandapower.networks as pn
+    import pandapower as pp
     
-    warnings.filterwarnings("ignore")
-    net = pn.case5() 
+    # Adjust import path if needed based on your directory structure
+    from homemade_grids.small_grids import case4_low_gen
+    
+    print("\n" + "="*90)
+    print(" STEP 1: RAW PHYSICAL GRID DEFINITION (Pandapower)".center(90))
+    print("="*90)
+    
+    # 1. Load the grid
+    net = case4_low_gen()
+    
+    # Apply standard physical rules
+    if not net.ext_grid.empty:
+        net.ext_grid['min_p_mw'] = 0.0
 
-    print("\n" + "="*120)
-    print(" QUBO FORENSICS: THE WIDER STORY ".center(120, "="))
-    print("="*120)
+    print("\n--- LOADS (Demand) ---")
+    load_cols = [c for c in ['bus', 'p_mw', 'scaling', 'in_service'] if c in net.load.columns]
+    print(net.load[load_cols].to_string())
     
-    # Formulate using the optimized
-    f = QuboFormulator(
-        formulation="dc_ptdf", encoding="unary", mw_precision=10.0,
-        scale_line_constraints=True, smart_slack_side=True, ptdf_rel_threshold=0.05
+    print("\n--- GENERATORS (Supply) ---")
+    if not net.ext_grid.empty:
+        print("\nExt Grid (Slack Reference):")
+        ext_cols = [c for c in ['bus', 'min_p_mw', 'max_p_mw'] if c in net.ext_grid.columns]
+        print(net.ext_grid[ext_cols].to_string())
+    if not net.gen.empty:
+        print("\nStandard Generators:")
+        gen_cols = [c for c in ['bus', 'min_p_mw', 'max_p_mw'] if c in net.gen.columns]
+        print(net.gen[gen_cols].to_string())
+        
+    print("\n--- TRANSMISSION LINES (Routing) ---")
+    line_cols = [c for c in ['from_bus', 'to_bus', 'length_km', 'x_ohm_per_km', 'max_i_ka', 'max_loading_percent'] if c in net.line.columns]
+    print(net.line[line_cols].to_string())
+    
+    print("\n--- COSTS (Economics) ---")
+    if hasattr(net, 'poly_cost') and not net.poly_cost.empty:
+        print("\nPolynomial Costs:")
+        poly_cols = [c for c in ['et', 'element', 'cp0_eur', 'cp1_eur_per_mw', 'cp2_eur_per_mw2'] if c in net.poly_cost.columns]
+        print(net.poly_cost[poly_cols].to_string())
+    if hasattr(net, 'pwl_cost') and not net.pwl_cost.empty:
+        print("\nPiecewise Linear Costs:")
+        pwl_cols = [c for c in ['et', 'element', 'points'] if c in net.pwl_cost.columns]
+        print(net.pwl_cost[pwl_cols].to_string())
+
+    print("\n\n" + "="*90)
+    print(" STEP 2: MATHEMATICAL QUBO TRANSFORMATION".center(90))
+    print("="*90)
+    
+    # 2. Initialize the Formulator
+    # Using DC-PTDF with Radix encoding and a 10 MW step size
+    formulator = QuboFormulator(
+        formulation="dc_ptdf",
+        encoding="radix",
+        mw_precision=10.0,
+        ptdf_threshold=0.05
     )
-    bqm, cx = f._formulate_qubo(net)
-    ising = bqm.change_vartype(dimod.SPIN, inplace=False)
-
-    # ---------------------------------------------------------
-    # 1. The PWL Artifact Check (Are generators outliers?)
-    # ---------------------------------------------------------
-    print("\n--- 1. GENERATOR COST POLYNOMIAL FIT CHECK ---")
-    print("Checking if massive quadratic terms are artifacts of PWL fitting.")
-    print(f"{'Asset':<15} | {'Max Capacity':<15} | {'Linear (c1)':<15} | {'Quadratic (c2)':<15}")
-    print("-" * 65)
     
-    for et in ["gen", "sgen", "ext_grid"]:
-        for idx, reg in f.var_registry[et].items():
-            c0, c1, c2 = f._cost_coeffs(et, idx)
-            print(f"{et}_{idx:<11} | {reg['max']:<15.1f} | {c1:<15.4f} | {c2:<15.4f}")
-
-    # ---------------------------------------------------------
-    # 2. Granular Identity of the Minimums & Maximums
-    # ---------------------------------------------------------
-    print("\n--- 2. THE ISING MAGNITUDE IDENTITY (Who defines the boundaries?) ---")
+    # 3. View the algebraic expansion
+    bqm, complexity = formulator.view_problem_definition(net)
     
-    # Corrected unpacking: iter_quadratic() yields (u, v, val)
-    j_magnitudes = [(abs(val), u, v) for u, v, val in ising.iter_quadratic() if abs(val) > 1e-12]
-    j_magnitudes.sort(key=lambda x: x[0])  # Sort smallest to largest
+    print("\n" + "="*90)
+    print(" STEP 3: FINAL QUBO MATRIX INSPECTION".center(90))
+    print("="*90)
     
-    if j_magnitudes:
-        print("\n[ BOTTOM 5 SMALLEST INTERACTIONS (The Noise Floor Bottleneck) ]")
-        for val, u, v in j_magnitudes[:5]:
-            print(f"  {val:>10.2f}  -->  {u:<25} AND  {v}")
-            
-        print("\n[ TOP 5 LARGEST INTERACTIONS (The Dynamic Range Ceiling) ]")
-        for val, u, v in j_magnitudes[-5:]:
-            print(f"  {val:>10.2f}  -->  {u:<25} AND  {v}")
-            
-    # ---------------------------------------------------------
-    # 3. Granular Group Splitting by Variable Prefix
-    # ---------------------------------------------------------
-    print("\n--- 3. DETAILED SPLIT BY VARIABLE GROUP ---")
+    # 4. Prove the matrix is flat
+    linear_terms = list(bqm.linear.items())
+    quad_terms = list(bqm.quadratic.items())
     
-    def extract_base_name(var_name):
-        # Extracts 'gen_2' from 'gen_2_bit_0'
-        return var_name.split('_bit_')[0]
-
-    granular_groups = {}
+    print(f"Total Logical Variables (Qubits): {len(bqm.variables)}")
+    print(f"Total Quadratic Interactions (Couplers): {len(bqm.quadratic)}\n")
     
-    # Corrected unpacking here as well
-    for u, v, val in ising.iter_quadratic():
-        if abs(val) > 1e-12:
-            base_u = extract_base_name(u)
-            base_v = extract_base_name(v)
-            # Create a sorted pair key (e.g., 'gen_0 - slack_line_1')
-            pair_key = " - ".join(sorted([base_u, base_v]))
-            granular_groups.setdefault(pair_key, []).append(abs(val))
-
-    print(f"{'Interaction Pair':<35} | {'Count':<6} | {'Min |J|':<12} | {'Median |J|':<12} | {'Max |J|':<12}")
-    print("-" * 85)
+    print("--- First 5 Linear Terms (Q_ii) ---")
+    for var, bias in linear_terms[:5]:
+        print(f"  {var:<20}: {bias:.2f}")
+        
+    print("\n--- First 5 Quadratic Terms (Q_ij) ---")
+    for (u, v), bias in quad_terms[:5]:
+        print(f"  ({u:<15}, {v:<15}): {bias:.2f}")
     
-    # Sort by Max |J| descending
-    sorted_groups = sorted(granular_groups.items(), key=lambda kv: -max(kv[1]))
-    
-    for pair, vals in sorted_groups:
-        print(f"{pair:<35} | {len(vals):<6} | {min(vals):<12.2f} | {np.median(vals):<12.2f} | {max(vals):<12.2f}")
-    
-    print("\n" + "="*120 + "\n")
+    print(f"\n[+] Hardware Dynamic Range: {complexity['hardware_limits'].get('ising_dynamic_range', 'N/A')}")
