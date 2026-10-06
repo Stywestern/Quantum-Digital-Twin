@@ -1,0 +1,159 @@
+{
+    "problem_parameters": {
+        "network_name": "case39",
+        "topology": {
+            "buses": 39,
+            "branches": 46,
+            "lines": 35,
+            "trafos": 11,
+            "is_connected": true
+        },
+        "dispatchable_assets": {
+            "total_count": 10,
+            "generators": 9,
+            "external_grids": 1,
+            "capacity_max_mw": 7367.0,
+            "capacity_min_mw": 0.0
+        },
+        "demand": {
+            "load_count": 21,
+            "total_load_mw": 6254.23,
+            "static_gen_mw": 0.0,
+            "net_active_demand_mw": 6254.23
+        },
+        "feasibility_precheck": {
+            "capacity_sufficient": true
+        },
+        "linear_costs_eur_per_mw": {
+            "gen_0": 0.3,
+            "ext_grid_0": 0.3,
+            "gen_1": 0.3,
+            "gen_2": 0.3,
+            "gen_3": 0.3,
+            "gen_4": 0.3,
+            "gen_5": 0.3,
+            "gen_6": 0.3,
+            "gen_7": 0.3,
+            "gen_8": 0.3
+        }
+    },
+    "opf_results": {
+        "solution": {
+            "cost_eur_per_hr": null,
+            "generator_dispatch_mw": {},
+            "static_generator_dispatch_mw": {},
+            "slack_dispatch_mw": {},
+            "grid_state": {
+                "max_line_loading_percent": 0.0,
+                "max_voltage_pu": null,
+                "min_voltage_pu": null,
+                "feasibility": {
+                    "is_feasible": false,
+                    "line_flows_mw": {}
+                }
+            }
+        },
+        "metadata": {
+            "status": "Failed: All embedding heuristics failed.",
+            "solver_name": "emulated_qpu_sa_dc_theta",
+            "execution_time_seconds": {
+                "total": 392.1834,
+                "formulation_cpu": 0.0458,
+                "embedding_cpu": 0.0,
+                "sampling_analog_sim": 0.0
+            },
+            "problem_complexity": {
+                "formulation": "dc_theta",
+                "encoding": "radix",
+                "classical_domain_input": {
+                    "continuous_variables": 48,
+                    "equality_constraints": 39,
+                    "inequality_constraints": 90
+                },
+                "quantum_domain_qubo": {
+                    "total_logical_qubits": 625,
+                    "qubits_used_for_variables": 382,
+                    "qubits_used_for_dispatch": 43,
+                    "qubits_used_for_angles": 339,
+                    "qubits_wasted_on_slack": 243,
+                    "num_interactions": 16578,
+                    "density_percent": 8.5,
+                    "offset": 87976251.29174152
+                },
+                "hardware_limits": {
+                    "ising_max": 280837352.8163,
+                    "ising_min": 0.0,
+                    "ising_dynamic_range": 3.8597991866922737e+18,
+                    "ising_at_risk_percent": 95.99,
+                    "max_coefficient_magnitude": 1178877123.8266,
+                    "min_coefficient_magnitude": 132.1727,
+                    "dac_precision_warning": true
+                },
+                "penalties": {
+                    "balance": 0.5352,
+                    "line": {
+                        "line_0": 0.2676,
+                        "line_1": 0.5352,
+                        "line_2": 0.2676,
+                        "line_3": 0.2676,
+                        "line_4": 0.2676,
+                        "line_5": 0.2676,
+                        "line_6": 0.2676,
+                        "line_7": 0.2676,
+                        "line_8": 0.2676,
+                        "line_9": 0.2676,
+                        "line_10": 0.2676,
+                        "line_11": 0.2676,
+                        "line_12": 0.2676,
+                        "line_13": 0.2676,
+                        "line_14": 0.5352,
+                        "line_15": 0.2676,
+                        "line_16": 0.2676,
+                        "line_17": 0.2676,
+                        "line_18": 0.2676,
+                        "line_19": 0.2676,
+                        "line_20": 0.2676,
+                        "line_21": 0.2676,
+                        "line_22": 0.2676,
+                        "line_23": 0.2676,
+                        "line_24": 0.2676,
+                        "line_25": 0.2676,
+                        "line_26": 0.2676,
+                        "line_27": 0.2676,
+                        "line_28": 0.2676,
+                        "line_29": 0.28559999999999997,
+                        "line_30": 0.2676,
+                        "line_31": 0.2676,
+                        "line_32": 0.2676,
+                        "line_33": 0.2676,
+                        "line_34": 0.2676,
+                        "trafo_0": 0.5064,
+                        "trafo_1": 0.31728,
+                        "trafo_2": 0.3552,
+                        "trafo_3": 0.2676,
+                        "trafo_4": 0.2676,
+                        "trafo_5": 0.2676,
+                        "trafo_6": 0.32016000000000006,
+                        "trafo_7": 0.25104000000000004,
+                        "trafo_8": 0.33696,
+                        "trafo_9": 0.27792,
+                        "trafo_10": 0.4224
+                    }
+                }
+            },
+            "hardware_feasibility_report": {
+                "at_risk_fraction": 0.957
+            },
+            "qubo_parameters": {
+                "mw_precision": 50.0,
+                "penalty_balance": null,
+                "penalty_line": null
+            },
+            "hardware_metrics": {},
+            "algorithmic_metrics": {
+                "framework": "hardware_aware_analog_simulation",
+                "sampler_stats": {}
+            }
+        }
+    }
+}

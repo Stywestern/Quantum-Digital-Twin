@@ -21,14 +21,20 @@ if __name__ == "__main__":
         #case3_low_gen,
         #case4_high_gen,
         pn.case5,
-        #pn.case9,
-        #pn.case14
+        pn.case9,
+        pn.case14,
+        pn.case30,
+        pn.case39,
+        pn.case57,
+        pn.case118,
+        pn.case145,
+        pn.case300,
     ]
     
     # 2. Define the parameter space
-    formulations = ["dc_ptdf", "dc_theta"] # 
+    formulations = ["dc_ptdf", "dc_theta"] # , "dc_theta"
     encodings = ["radix"] # , "unary"
-    precisions = [50.0, 25.0, 10.0] #
+    precisions = [50.0, 20.0, 10.0] #25.0,
     
     # 3. Define the SQA Hyperparameters
     num_reads = 500

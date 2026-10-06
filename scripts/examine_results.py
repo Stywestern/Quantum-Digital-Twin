@@ -34,28 +34,32 @@ def generate_wp2_plots(df: pd.DataFrame, out_dir: str):
     # 1. Hardware Overhead: Logical vs Physical Qubits (Encoding Comparison)
     qpu_df = df[df["Solver"].str.startswith("EMU")].copy()
     if not qpu_df.empty:
-        plt.figure(figsize=(10, 6))
-        
-        # We want to see how encoding impacts the physical footprint on a specific grid
         overhead_df = qpu_df.groupby(["Grid", "Enc"])[["L-Qub", "P-Qub"]].mean().reset_index()
         
-        x = np.arange(len(overhead_df["Grid"].unique()))
+        # Get a sorted list of all unique grids to serve as the master X-axis
+        grids = sorted(overhead_df["Grid"].unique())
+        x = np.arange(len(grids))
         width = 0.35
         
         fig, ax = plt.subplots(figsize=(12, 6))
         
         for i, enc in enumerate(["radix", "unary"]):
-            enc_data = overhead_df[overhead_df["Enc"] == enc]
-            if not enc_data.empty:
-                # Plot Logical Qubits
-                ax.bar(x + (i*width) - width/4, enc_data["L-Qub"], width/2, label=f'{enc} (Logical)', color=sns.color_palette("muted")[i], alpha=0.9)
-                # Plot Physical Qubits (Stacked behind to show overhead)
-                ax.bar(x + (i*width) + width/4, enc_data["P-Qub"], width/2, label=f'{enc} (Physical)', color=sns.color_palette("dark")[i], alpha=0.9)
+            # Filter by encoding, set Grid as index, and reindex to the master grid list
+            # This pads missing grid/encoding combinations with NaN so matplotlib doesn't crash
+            enc_data = overhead_df[overhead_df["Enc"] == enc].set_index("Grid").reindex(grids)
+            
+            # Plot Logical Qubits
+            ax.bar(x + (i*width) - width/4, enc_data["L-Qub"], width/2, 
+                   label=f'{enc} (Logical)', color=sns.color_palette("muted")[i], alpha=0.9)
+            # Plot Physical Qubits (Stacked alongside)
+            ax.bar(x + (i*width) + width/4, enc_data["P-Qub"], width/2, 
+                   label=f'{enc} (Physical)', color=sns.color_palette("dark")[i], alpha=0.9)
 
-        ax.set_ylabel('Qubit Count')
+        ax.set_ylabel('Average Qubit Count')
         ax.set_title('Hardware Overhead: Logical vs. Embedded Physical Qubits')
         ax.set_xticks(x + width / 2)
-        ax.set_xticklabels(overhead_df["Grid"].unique())
+        # Rotated labels so the 11 grid names don't overlap
+        ax.set_xticklabels(grids, rotation=45, ha="right")
         ax.legend()
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, "wp2_hardware_overhead.png"), dpi=300)
@@ -95,6 +99,7 @@ def generate_wp2_plots(df: pd.DataFrame, out_dir: str):
         plt.title("Solver Accuracy: Optimality Gap relative to Continuous IP Baseline")
         plt.ylabel("Cost Deviation from True Minimum (%)")
         plt.axhline(0, color='red', lw=2, ls='--', label='IP Baseline (0%)')
+        plt.xticks(rotation=45, ha="right")
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, "wp2_optimality_gap.png"), dpi=300)

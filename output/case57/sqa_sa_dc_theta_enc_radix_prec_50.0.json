@@ -1,0 +1,190 @@
+{
+    "problem_parameters": {
+        "network_name": "case57",
+        "topology": {
+            "buses": 57,
+            "branches": 80,
+            "lines": 63,
+            "trafos": 17,
+            "is_connected": true
+        },
+        "dispatchable_assets": {
+            "total_count": 7,
+            "generators": 6,
+            "external_grids": 1,
+            "capacity_max_mw": 1975.88,
+            "capacity_min_mw": 0.0
+        },
+        "demand": {
+            "load_count": 42,
+            "total_load_mw": 1250.8,
+            "static_gen_mw": 0.0,
+            "net_active_demand_mw": 1250.8
+        },
+        "feasibility_precheck": {
+            "capacity_sufficient": true
+        },
+        "linear_costs_eur_per_mw": {
+            "ext_grid_0": 20.0,
+            "gen_0": 40.0,
+            "gen_1": 20.0,
+            "gen_2": 40.0,
+            "gen_3": 20.0,
+            "gen_4": 40.0,
+            "gen_5": 20.0
+        }
+    },
+    "opf_results": {
+        "solution": {
+            "cost_eur_per_hr": null,
+            "generator_dispatch_mw": {},
+            "static_generator_dispatch_mw": {},
+            "slack_dispatch_mw": {},
+            "grid_state": {
+                "max_line_loading_percent": 0.0,
+                "max_voltage_pu": null,
+                "min_voltage_pu": null,
+                "feasibility": {
+                    "is_feasible": false,
+                    "line_flows_mw": {}
+                }
+            }
+        },
+        "metadata": {
+            "status": "Failed: All embedding heuristics failed.",
+            "solver_name": "emulated_qpu_sa_dc_theta",
+            "execution_time_seconds": {
+                "total": 405.3102,
+                "formulation_cpu": 0.064,
+                "embedding_cpu": 0.0,
+                "sampling_analog_sim": 0.0
+            },
+            "problem_complexity": {
+                "formulation": "dc_theta",
+                "encoding": "radix",
+                "classical_domain_input": {
+                    "continuous_variables": 63,
+                    "equality_constraints": 57,
+                    "inequality_constraints": 34
+                },
+                "quantum_domain_qubo": {
+                    "total_logical_qubits": 674,
+                    "qubits_used_for_variables": 566,
+                    "qubits_used_for_dispatch": 20,
+                    "qubits_used_for_angles": 546,
+                    "qubits_wasted_on_slack": 108,
+                    "num_interactions": 24536,
+                    "density_percent": 10.82,
+                    "offset": 9328499381.791737
+                },
+                "hardware_limits": {
+                    "ising_max": 178257161121.1387,
+                    "ising_min": 10.35934,
+                    "ising_dynamic_range": 17207385396.25,
+                    "ising_at_risk_percent": 99.72,
+                    "max_coefficient_magnitude": 713028644484.5547,
+                    "min_coefficient_magnitude": 247.8514,
+                    "dac_precision_warning": true
+                },
+                "penalties": {
+                    "balance": 2.62447115808,
+                    "line": {
+                        "line_0": 2.62447115808,
+                        "line_1": 2.16,
+                        "line_2": 2.16,
+                        "line_3": 1.31223557904,
+                        "line_4": 1.008,
+                        "line_5": 1.008,
+                        "line_6": 1.06666608,
+                        "line_7": 1.06666608,
+                        "line_8": 1.008,
+                        "line_9": 1.008,
+                        "line_10": 1.114839408,
+                        "line_11": 1.008,
+                        "line_12": 1.31223557904,
+                        "line_13": 1.31223557904,
+                        "line_14": 2.62447115808,
+                        "line_15": 2.62447115808,
+                        "line_16": 2.62447115808,
+                        "line_17": 2.16,
+                        "line_18": 1.008,
+                        "line_19": 1.06666608,
+                        "line_20": 1.114839408,
+                        "line_21": 1.31223557904,
+                        "line_22": 1.114839408,
+                        "line_23": 1.114839408,
+                        "line_24": 1.114839408,
+                        "line_25": 1.31223557904,
+                        "line_26": 1.31223557904,
+                        "line_27": 1.31223557904,
+                        "line_28": 1.31223557904,
+                        "line_29": 1.31223557904,
+                        "line_30": 1.31223557904,
+                        "line_31": 1.31223557904,
+                        "line_32": 1.31223557904,
+                        "line_33": 1.31223557904,
+                        "line_34": 1.31223557904,
+                        "line_35": 1.31223557904,
+                        "line_36": 1.31223557904,
+                        "line_37": 1.31223557904,
+                        "line_38": 1.31223557904,
+                        "line_39": 1.31223557904,
+                        "line_40": 1.31223557904,
+                        "line_41": 1.31223557904,
+                        "line_42": 1.31223557904,
+                        "line_43": 1.31223557904,
+                        "line_44": 1.31223557904,
+                        "line_45": 1.31223557904,
+                        "line_46": 1.31223557904,
+                        "line_47": 1.31223557904,
+                        "line_48": 1.31223557904,
+                        "line_49": 1.31223557904,
+                        "line_50": 1.31223557904,
+                        "line_51": 1.31223557904,
+                        "line_52": 1.31223557904,
+                        "line_53": 1.31223557904,
+                        "line_54": 1.31223557904,
+                        "line_55": 1.31223557904,
+                        "line_56": 1.31223557904,
+                        "line_57": 1.31223557904,
+                        "line_58": 1.31223557904,
+                        "line_59": 1.31223557904,
+                        "line_60": 1.31223557904,
+                        "line_61": 1.31223557904,
+                        "line_62": 1.31223557904,
+                        "trafo_0": 1.31223557904,
+                        "trafo_1": 1.31223557904,
+                        "trafo_2": 1.31223557904,
+                        "trafo_3": 1.31223557904,
+                        "trafo_4": 1.31223557904,
+                        "trafo_5": 1.31223557904,
+                        "trafo_6": 1.31223557904,
+                        "trafo_7": 1.31223557904,
+                        "trafo_8": 1.31223557904,
+                        "trafo_9": 1.31223557904,
+                        "trafo_10": 1.31223557904,
+                        "trafo_11": 1.31223557904,
+                        "trafo_12": 1.31223557904,
+                        "trafo_13": 1.31223557904,
+                        "trafo_14": 1.31223557904,
+                        "trafo_15": 1.31223557904,
+                        "trafo_16": 1.008
+                    }
+                }
+            },
+            "hardware_feasibility_report": {
+                "at_risk_fraction": 0.9968
+            },
+            "qubo_parameters": {
+                "mw_precision": 50.0,
+                "penalty_balance": null,
+                "penalty_line": null
+            },
+            "hardware_metrics": {},
+            "algorithmic_metrics": {
+                "framework": "hardware_aware_analog_simulation",
+                "sampler_stats": {}
+            }
+        }
+    }
+}

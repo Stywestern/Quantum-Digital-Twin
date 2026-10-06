@@ -1,0 +1,135 @@
+{
+    "problem_parameters": {
+        "network_name": "case145",
+        "topology": {
+            "buses": 145,
+            "branches": 453,
+            "lines": 378,
+            "trafos": 75,
+            "is_connected": true
+        },
+        "dispatchable_assets": {
+            "total_count": 50,
+            "generators": 49,
+            "external_grids": 1,
+            "capacity_max_mw": 362853.72,
+            "capacity_min_mw": 0.0
+        },
+        "demand": {
+            "load_count": 55,
+            "total_load_mw": 286079.65,
+            "static_gen_mw": 3028.5,
+            "net_active_demand_mw": 283051.15
+        },
+        "feasibility_precheck": {
+            "capacity_sufficient": true
+        },
+        "linear_costs_eur_per_mw": {
+            "gen_0": 20.0,
+            "gen_1": 20.0,
+            "gen_10": 20.0,
+            "gen_11": 20.0,
+            "gen_12": 20.0,
+            "gen_13": 20.0,
+            "gen_14": 20.0,
+            "gen_15": 20.0,
+            "gen_16": 20.0,
+            "gen_17": 20.0,
+            "gen_18": 20.0,
+            "gen_19": 20.0,
+            "gen_2": 20.0,
+            "gen_20": 20.0,
+            "gen_21": 20.0,
+            "gen_22": 20.0,
+            "gen_23": 20.0,
+            "gen_24": 20.0,
+            "gen_25": 20.0,
+            "gen_26": 20.0,
+            "gen_27": 20.0,
+            "gen_28": 20.0,
+            "gen_29": 20.0,
+            "gen_3": 20.0,
+            "gen_30": 20.0,
+            "gen_31": 20.0,
+            "gen_32": 20.0,
+            "gen_33": 20.0,
+            "gen_34": 20.0,
+            "gen_35": 20.0,
+            "gen_36": 20.0,
+            "gen_37": 20.0,
+            "gen_38": 20.0,
+            "gen_39": 20.0,
+            "gen_4": 20.0,
+            "gen_40": 20.0,
+            "gen_41": 20.0,
+            "gen_42": 20.0,
+            "gen_43": 20.0,
+            "gen_44": 20.0,
+            "gen_45": 20.0,
+            "gen_46": 20.0,
+            "gen_47": 20.0,
+            "gen_48": 20.0,
+            "ext_grid_0": 20.0,
+            "gen_5": 20.0,
+            "gen_6": 20.0,
+            "gen_7": 20.0,
+            "gen_8": 20.0,
+            "gen_9": 20.0
+        }
+    },
+    "opf_results": {
+        "solution": {
+            "cost_eur_per_hr": null,
+            "generator_dispatch_mw": {},
+            "static_generator_dispatch_mw": {},
+            "slack_dispatch_mw": {},
+            "grid_state": {
+                "max_line_loading_percent": null,
+                "max_voltage_pu": null,
+                "min_voltage_pu": null,
+                "feasibility": {
+                    "total_generation_mw": 0.0,
+                    "total_load_mw": 0.0,
+                    "raw_imbalance_mw": 0.0,
+                    "raw_slack_dispatch_mw": 0.0,
+                    "cost_raw_dispatch_eur": 0.0,
+                    "max_line_violation_mw": 0.0,
+                    "tolerance_mw": 0.0001,
+                    "balance_ok": false,
+                    "lines_ok": false,
+                    "bounds_ok": false,
+                    "is_feasible": false,
+                    "line_flows_mw": {},
+                    "bus_angles_rad": {}
+                }
+            }
+        },
+        "metadata": {
+            "status": "Failed to Converge",
+            "solver_name": "pandapower_dc_interior_point",
+            "execution_time_seconds": {
+                "total": 0.0348,
+                "qpu_master": 0.0,
+                "cpu_subproblem": 0.0348
+            },
+            "problem_complexity": {
+                "num_continuous_variables": 195,
+                "num_binary_variables": 0,
+                "num_equality_constraints": 145,
+                "num_inequality_constraints": 856
+            },
+            "algorithmic_metrics": {
+                "framework": "standard_interior_point",
+                "num_iterations": 1,
+                "optimality_gap_percent": 0.0
+            },
+            "hardware_metrics": {
+                "qpu_target": "none",
+                "logical_qubits": 0,
+                "physical_qubits": 0,
+                "max_chain_length": 0,
+                "circuit_depth": 0
+            }
+        }
+    }
+}
