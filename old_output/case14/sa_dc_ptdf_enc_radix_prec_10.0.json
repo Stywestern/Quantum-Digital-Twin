@@ -34,10 +34,10 @@
     },
     "opf_results": {
         "solution": {
-            "cost_eur_per_hr": 7669.728,
+            "cost_eur_per_hr": 7684.563,
             "generator_dispatch_mw": {
                 "0": {
-                    "p_mw": 30.0
+                    "p_mw": 50.0
                 },
                 "1": {
                     "p_mw": 0.0
@@ -46,25 +46,25 @@
                     "p_mw": 0.0
                 },
                 "3": {
-                    "p_mw": 10.0
+                    "p_mw": 0.0
                 }
             },
             "static_generator_dispatch_mw": {},
             "slack_dispatch_mw": {
                 "0": {
-                    "p_mw": 219.0
+                    "p_mw": 209.0
                 }
             },
             "grid_state": {
-                "max_line_loading_percent": 0.405,
+                "max_line_loading_percent": 0.425,
                 "max_voltage_pu": null,
                 "min_voltage_pu": null,
                 "feasibility": {
                     "total_generation_mw": 259.0,
                     "total_load_mw": 259.0,
                     "raw_imbalance_mw": 1.0,
-                    "raw_slack_dispatch_mw": 220.0,
-                    "cost_raw_dispatch_eur": 7708.618,
+                    "raw_slack_dispatch_mw": 210.0,
+                    "cost_raw_dispatch_eur": 7722.592,
                     "max_line_violation_mw": 0.0,
                     "tolerance_mw": 10.0,
                     "balance_ok": true,
@@ -72,42 +72,42 @@
                     "bounds_ok": true,
                     "is_feasible": true,
                     "line_flows_mw": {
-                        "line_0": 149.688,
-                        "line_1": 69.312,
-                        "line_2": 68.35,
-                        "line_3": 51.668,
-                        "line_4": 37.971,
-                        "line_5": -25.85,
-                        "line_6": -59.551,
-                        "line_7": 5.13,
-                        "line_8": 7.373,
-                        "line_9": 16.43,
-                        "line_10": 7.37,
-                        "line_11": 10.697,
-                        "line_12": -1.63,
-                        "line_13": 1.273,
-                        "line_14": 4.203,
-                        "trafo_0": 22.614,
-                        "trafo_1": 14.954,
-                        "trafo_2": 40.132,
-                        "trafo_3": -10.0,
-                        "trafo_4": 32.614
+                        "line_0": 139.5,
+                        "line_1": 69.5,
+                        "line_2": 70.324,
+                        "line_3": 55.799,
+                        "line_4": 41.678,
+                        "line_5": -23.876,
+                        "line_6": -61.54,
+                        "line_7": 6.277,
+                        "line_8": 7.541,
+                        "line_9": 17.02,
+                        "line_10": 6.223,
+                        "line_11": 9.939,
+                        "line_12": -2.777,
+                        "line_13": 1.441,
+                        "line_14": 4.961,
+                        "trafo_0": 29.014,
+                        "trafo_1": 16.648,
+                        "trafo_2": 42.038,
+                        "trafo_3": -0.0,
+                        "trafo_4": 29.014
                     },
                     "bus_angles_rad": {
                         "0": 0.0,
-                        "1": -0.08857,
-                        "2": -0.223882,
-                        "3": -0.17967,
-                        "4": -0.154594,
-                        "5": -0.255735,
-                        "6": -0.226961,
-                        "7": -0.209346,
-                        "8": -0.26284,
-                        "9": -0.269068,
-                        "10": -0.265938,
-                        "11": -0.274595,
-                        "12": -0.277138,
-                        "13": -0.291764
+                        "1": -0.082542,
+                        "2": -0.221762,
+                        "3": -0.180926,
+                        "4": -0.155012,
+                        "5": -0.260957,
+                        "6": -0.2416,
+                        "7": -0.2416,
+                        "8": -0.273519,
+                        "9": -0.278777,
+                        "10": -0.273442,
+                        "11": -0.280248,
+                        "12": -0.283128,
+                        "13": -0.300392
                     }
                 }
             }
@@ -116,9 +116,9 @@
             "status": "Success",
             "solver_name": "neal_simulated_annealing_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.7085,
-                "formulation_cpu": 0.0037,
-                "sampling_cpu_sa": 0.6977
+                "total": 1.1781,
+                "formulation_cpu": 0.0041,
+                "sampling_cpu_sa": 1.1666
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -186,15 +186,15 @@
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
+                    "num_sweeps_per_read": 5000,
                     "unique_states_found": 500,
-                    "energy_best": 7719.42,
-                    "energy_mean": 8900.52,
-                    "energy_worst": 11318.8,
-                    "energy_std_dev": 624.69,
+                    "energy_best": 7733.39,
+                    "energy_mean": 8856.01,
+                    "energy_worst": 11702.01,
+                    "energy_std_dev": 621.96,
                     "reads_checked_for_feasibility": 1,
                     "feasible_read_found": true,
-                    "chosen_sample_energy": 7719.418119999871
+                    "chosen_sample_energy": 7733.392129999935
                 }
             },
             "hardware_metrics": {

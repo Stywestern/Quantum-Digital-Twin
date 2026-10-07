@@ -76,10 +76,10 @@
             "status": "Success",
             "solver_name": "emulated_qpu_sa_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.2746,
-                "formulation_cpu": 0.0024,
-                "embedding_cpu": 0.0746,
-                "sampling_analog_sim": 0.1915
+                "total": 0.5702,
+                "formulation_cpu": 0.0018,
+                "embedding_cpu": 0.106,
+                "sampling_analog_sim": 0.4513
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -97,23 +97,23 @@
                     "qubits_wasted_on_slack": 1,
                     "num_interactions": 8,
                     "density_percent": 80.0,
-                    "offset": 13824.458163186033
+                    "offset": 12672.41998292053
                 },
                 "hardware_limits": {
-                    "ising_max": 1800.0,
-                    "ising_min": 40.0,
-                    "ising_dynamic_range": 45.0,
-                    "ising_at_risk_percent": 15.38,
-                    "max_coefficient_magnitude": 7200.0,
-                    "min_coefficient_magnitude": 1246.8955,
+                    "ising_max": 1650.0,
+                    "ising_min": 120.0,
+                    "ising_dynamic_range": 13.75,
+                    "ising_at_risk_percent": 0.0,
+                    "max_coefficient_magnitude": 6600.0,
+                    "min_coefficient_magnitude": 1142.9875,
                     "dac_precision_warning": false
                 },
                 "penalties": {
-                    "balance": 0.96,
+                    "balance": 0.88,
                     "line": {
-                        "line_0": 0.96,
-                        "line_1": 0.48,
-                        "line_2": 0.48
+                        "line_0": 0.88,
+                        "line_1": 0.44,
+                        "line_2": 0.44
                     }
                 }
             },
@@ -126,26 +126,26 @@
                 "penalty_line": null
             },
             "hardware_metrics": {
-                "qpu_target": "ideal_zephyr_Z(12,4)",
+                "qpu_target": "ideal_zephyr_Z(15,4)",
                 "topology": {
                     "type": "zephyr",
                     "shape": [
-                        12,
+                        15,
                         4
                     ]
                 },
                 "logical_qubits": 5,
-                "physical_qubits": 5,
-                "qubit_overhead_factor": 1.0,
-                "max_chain_length": 1,
-                "mean_chain_length": 1.0,
-                "chain_length_variance": 0.0,
-                "multi_qubit_chains": 0,
-                "single_qubit_variables": 5,
-                "total_chain_qubits": 5,
-                "embedding_heuristic_winner": "minorminer_seed1",
-                "hardware_scale_factor": 0.0005555555555555556,
-                "chain_strength_applied": 2987.5246850863,
+                "physical_qubits": 6,
+                "qubit_overhead_factor": 1.2,
+                "max_chain_length": 2,
+                "mean_chain_length": 1.2,
+                "chain_length_variance": 0.16,
+                "multi_qubit_chains": 1,
+                "single_qubit_variables": 4,
+                "total_chain_qubits": 6,
+                "embedding_heuristic_winner": "minorminer_seed0",
+                "hardware_scale_factor": 0.0006060606060606061,
+                "chain_strength_applied": 2738.564294662442,
                 "dac_resolution_bits": 5,
                 "dac_step_granularity": 0.03125,
                 "ice_sigma_h": 0.01,
@@ -154,14 +154,14 @@
             "algorithmic_metrics": {
                 "framework": "hardware_aware_analog_simulation",
                 "sampler_stats": {
-                    "num_reads_requested": 500,
+                    "num_reads_requested": 1000,
                     "num_sweeps_per_read": 5000,
-                    "unique_states_found": 500,
-                    "raw_energy_best_logical": 3384.46,
-                    "raw_energy_mean_logical": 3423.85,
-                    "sds_energy_best_logical": 3384.46,
-                    "sds_energy_mean_logical": 3423.85,
-                    "energy_improvement_delta": 0.0,
+                    "unique_states_found": 1000,
+                    "raw_energy_best_logical": 3352.42,
+                    "raw_energy_mean_logical": 3372.4,
+                    "sds_energy_best_logical": 3352.42,
+                    "sds_energy_mean_logical": 3372.4,
+                    "energy_improvement_delta": -0.0,
                     "mean_chain_break_fraction": 0.0,
                     "postprocess_physical_flips": 1,
                     "postprocess_logical_flips": 0,

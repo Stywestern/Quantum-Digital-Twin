@@ -77,9 +77,9 @@
             "status": "Success",
             "solver_name": "neal_simulated_annealing_dc_theta",
             "execution_time_seconds": {
-                "total": 0.4887,
-                "formulation_cpu": 0.002,
-                "sampling_cpu_sa": 0.4858
+                "total": 0.9459,
+                "formulation_cpu": 0.0052,
+                "sampling_cpu_sa": 0.8711
             },
             "problem_complexity": {
                 "formulation": "dc_theta",
@@ -130,12 +130,15 @@
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
+                    "num_sweeps_per_read": 5000,
                     "unique_states_found": 500,
                     "energy_best": 2645.04,
-                    "energy_mean": 4003.96,
-                    "energy_worst": 9782.51,
-                    "energy_std_dev": 965.59
+                    "energy_mean": 4018.57,
+                    "energy_worst": 8857.82,
+                    "energy_std_dev": 827.15,
+                    "reads_checked_for_feasibility": 1,
+                    "feasible_read_found": true,
+                    "chosen_sample_energy": 2645.0410216179735
                 }
             },
             "hardware_metrics": {

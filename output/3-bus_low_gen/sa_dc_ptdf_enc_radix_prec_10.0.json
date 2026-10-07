@@ -76,9 +76,9 @@
             "status": "Success",
             "solver_name": "neal_simulated_annealing_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.5066,
-                "formulation_cpu": 0.0017,
-                "sampling_cpu_sa": 0.4983
+                "total": 1.0019,
+                "formulation_cpu": 0.0031,
+                "sampling_cpu_sa": 0.9888
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -96,23 +96,23 @@
                     "qubits_wasted_on_slack": 4,
                     "num_interactions": 50,
                     "density_percent": 75.76,
-                    "offset": 69122.29081593016
+                    "offset": 63362.09991460266
                 },
                 "hardware_limits": {
-                    "ising_max": 4320.0,
-                    "ising_min": 96.552275,
+                    "ising_max": 3960.0,
+                    "ising_min": 88.506252,
                     "ising_dynamic_range": 44.74,
                     "ising_at_risk_percent": 3.23,
-                    "max_coefficient_magnitude": 36800.0,
-                    "min_coefficient_magnitude": 286.8955,
+                    "max_coefficient_magnitude": 33600.0,
+                    "min_coefficient_magnitude": 262.9875,
                     "dac_precision_warning": false
                 },
                 "penalties": {
-                    "balance": 4.8,
+                    "balance": 4.4,
                     "line": {
-                        "line_0": 4.8,
-                        "line_1": 2.4,
-                        "line_2": 2.4
+                        "line_0": 4.4,
+                        "line_1": 2.2,
+                        "line_2": 2.2
                     }
                 }
             },
@@ -128,16 +128,16 @@
                 "num_iterations": 1,
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
-                    "num_reads_requested": 500,
+                    "num_reads_requested": 1000,
                     "num_sweeps_per_read": 5000,
-                    "unique_states_found": 500,
-                    "energy_best": 2995.4,
-                    "energy_mean": 3368.03,
-                    "energy_worst": 4489.19,
-                    "energy_std_dev": 293.0,
+                    "unique_states_found": 1000,
+                    "energy_best": 2979.11,
+                    "energy_mean": 3334.63,
+                    "energy_worst": 4242.1,
+                    "energy_std_dev": 295.5,
                     "reads_checked_for_feasibility": 1,
                     "feasible_read_found": true,
-                    "chosen_sample_energy": 2995.395365266413
+                    "chosen_sample_energy": 2979.1124181608757
                 }
             },
             "hardware_metrics": {

@@ -27,7 +27,7 @@ class EmulationResult:
 
 
 class EmulatedQPU:
-    def __init__(self, hardware: Hardware, schedule: Schedule | None = None, sampler: str = "sa",
+    def __init__(self, hardware: Hardware, sampler: str = "sa",
                  sampler_kwargs: dict | None = None, dac_bits: int | None = 5,
                  ice_sigma_h: float = 0.02, ice_sigma_j: float = 0.01,
                  use_extended_j: bool = True, seed: int = 0):

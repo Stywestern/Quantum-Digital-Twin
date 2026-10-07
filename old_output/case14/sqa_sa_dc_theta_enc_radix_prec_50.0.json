@@ -34,82 +34,82 @@
     },
     "opf_results": {
         "solution": {
-            "cost_eur_per_hr": 11952.332,
+            "cost_eur_per_hr": 9529.785,
             "generator_dispatch_mw": {
                 "0": {
-                    "p_mw": 100.0
+                    "p_mw": 0.0
                 },
                 "1": {
-                    "p_mw": 100.0
+                    "p_mw": 0.0
                 },
                 "2": {
                     "p_mw": 100.0
                 },
                 "3": {
-                    "p_mw": 0.0
+                    "p_mw": 100.0
                 }
             },
             "static_generator_dispatch_mw": {},
             "slack_dispatch_mw": {
                 "0": {
-                    "p_mw": -41.0
+                    "p_mw": 59.0
                 }
             },
             "grid_state": {
-                "max_line_loading_percent": 0.26,
+                "max_line_loading_percent": 1.01,
                 "max_voltage_pu": null,
                 "min_voltage_pu": null,
                 "feasibility": {
                     "total_generation_mw": 259.0,
                     "total_load_mw": 259.0,
-                    "raw_imbalance_mw": 241.0,
-                    "raw_slack_dispatch_mw": 200.0,
-                    "cost_raw_dispatch_eur": 18421.172,
+                    "raw_imbalance_mw": -59.0,
+                    "raw_slack_dispatch_mw": 0.0,
+                    "cost_raw_dispatch_eur": 8200.0,
                     "max_line_violation_mw": 0.0,
                     "tolerance_mw": 50.0,
                     "balance_ok": false,
                     "lines_ok": true,
-                    "bounds_ok": false,
+                    "bounds_ok": true,
                     "is_feasible": false,
                     "line_flows_mw": {
-                        "line_0": -40.047,
-                        "line_1": -0.953,
-                        "line_2": 6.538,
-                        "line_3": 19.309,
-                        "line_4": 12.406,
-                        "line_5": 12.338,
-                        "line_6": -29.623,
-                        "line_7": 25.663,
-                        "line_8": 10.388,
-                        "line_9": 26.979,
-                        "line_10": -13.163,
-                        "line_11": -2.867,
-                        "line_12": -22.163,
-                        "line_13": 4.288,
-                        "line_14": 17.767,
-                        "trafo_0": 8.559,
-                        "trafo_1": 4.911,
-                        "trafo_2": -25.77,
-                        "trafo_3": 0.0,
-                        "trafo_4": 8.559
+                        "line_0": 52.68,
+                        "line_1": 6.32,
+                        "line_2": 42.736,
+                        "line_3": -1.936,
+                        "line_4": -9.82,
+                        "line_5": -51.464,
+                        "line_6": -32.439,
+                        "line_7": 14.962,
+                        "line_8": 8.817,
+                        "line_9": 21.482,
+                        "line_10": -2.462,
+                        "line_11": 4.202,
+                        "line_12": -11.462,
+                        "line_13": 2.717,
+                        "line_14": 10.698,
+                        "trafo_0": -56.259,
+                        "trafo_1": -12.501,
+                        "trafo_2": -43.539,
+                        "trafo_3": -100.0,
+                        "trafo_4": 43.741
                     },
                     "bus_angles_rad": {
                         "0": 0.0,
-                        "1": 0.023696,
-                        "2": 0.010753,
-                        "3": -0.010349,
-                        "4": 0.002125,
-                        "5": 0.06707,
-                        "6": -0.028248,
-                        "7": -0.028248,
-                        "8": -0.037663,
-                        "9": -0.026541,
-                        "10": 0.016027,
-                        "11": 0.040496,
-                        "12": 0.031924,
-                        "13": -0.02991
+                        "1": -0.031171,
+                        "2": -0.115775,
+                        "3": -0.027756,
+                        "4": -0.014096,
+                        "5": 0.095631,
+                        "6": 0.089893,
+                        "7": 0.266043,
+                        "8": 0.041774,
+                        "9": 0.043855,
+                        "10": 0.065871,
+                        "11": 0.073077,
+                        "12": 0.067647,
+                        "13": 0.030414
                     },
-                    "max_nodal_mismatch_mw": 1184.624
+                    "max_nodal_mismatch_mw": 376.781
                 }
             }
         },
@@ -117,10 +117,10 @@
             "status": "Success",
             "solver_name": "emulated_qpu_sa_dc_theta",
             "execution_time_seconds": {
-                "total": 361.2866,
-                "formulation_cpu": 0.0188,
-                "embedding_cpu": 283.8368,
-                "sampling_analog_sim": 77.4194
+                "total": 356.9763,
+                "formulation_cpu": 0.0159,
+                "embedding_cpu": 277.6326,
+                "sampling_analog_sim": 79.2872
             },
             "problem_complexity": {
                 "formulation": "dc_theta",
@@ -196,10 +196,16 @@
                 "physical_qubits": 1437,
                 "qubit_overhead_factor": 9.04,
                 "max_chain_length": 17,
+                "mean_chain_length": 9.04,
+                "chain_length_variance": 12.552,
+                "multi_qubit_chains": 159,
+                "single_qubit_variables": 0,
+                "total_chain_qubits": 1437,
                 "embedding_heuristic_winner": "minorminer_seed1",
                 "hardware_scale_factor": 4.042439188244009e-10,
                 "chain_strength_applied": 1614906120.6628168,
                 "dac_resolution_bits": 5,
+                "dac_step_granularity": 0.03125,
                 "ice_sigma_h": 0.01,
                 "ice_sigma_j": 0.01
             },
@@ -207,16 +213,17 @@
                 "framework": "hardware_aware_analog_simulation",
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
-                    "unique_states_found_sds": 500,
-                    "raw_energy_best_logical": 871852961.53,
-                    "raw_energy_mean_logical": 6157727985.53,
-                    "raw_chain_break_fraction_mean": 0.0334,
-                    "sds_energy_best_logical": 4449931.03,
-                    "sds_energy_mean_logical": 306715800.97,
-                    "sds_chain_break_fraction_mean": 0.0333,
-                    "postprocess_physical_flips": 350,
-                    "postprocess_logical_flips": 26723
+                    "num_sweeps_per_read": 5000,
+                    "unique_states_found": 500,
+                    "raw_energy_best_logical": -6569097263.54,
+                    "raw_energy_mean_logical": 2787346236.53,
+                    "sds_energy_best_logical": 1250757.48,
+                    "sds_energy_mean_logical": 250331284.42,
+                    "energy_improvement_delta": -6570348021.02,
+                    "mean_chain_break_fraction": 0.2219,
+                    "postprocess_physical_flips": 103325,
+                    "postprocess_logical_flips": 25857,
+                    "total_flips_executed": 129182
                 }
             }
         }

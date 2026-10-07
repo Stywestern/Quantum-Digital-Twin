@@ -13,7 +13,7 @@
             "generators": 2,
             "external_grids": 1,
             "capacity_max_mw": 820.0,
-            "capacity_min_mw": 30.0
+            "capacity_min_mw": 20.0
         },
         "demand": {
             "load_count": 3,
@@ -92,9 +92,9 @@
             "status": "Success",
             "solver_name": "pandapower_dc_interior_point",
             "execution_time_seconds": {
-                "total": 0.2666,
+                "total": 0.0244,
                 "qpu_master": 0.0,
-                "cpu_subproblem": 0.2666
+                "cpu_subproblem": 0.0244
             },
             "problem_complexity": {
                 "num_continuous_variables": 12,

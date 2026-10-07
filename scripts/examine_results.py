@@ -28,25 +28,27 @@ def parse_solver_tag(file_name: str, meta: dict) -> str:
 
 
 def generate_wp2_plots(df: pd.DataFrame, out_dir: str):
-    """Generates analytical visualizations for WP2 reporting."""
+    """Generates analytical visualizations for WP2 reporting, sorted by true quantum complexity."""
     sns.set_theme(style="whitegrid", context="paper")
     
+    # --- Create a global Grid sorting index based on Logical Qubit Count ---
+    # This prevents alphabetical sorting (e.g. case118 coming before case14)
+    grid_complexity = df[df["L-Qub"].notna()].groupby("Grid")["L-Qub"].min().sort_values()
+    sorted_grids = grid_complexity.index.tolist()
+
     # 1. Hardware Overhead: Logical vs Physical Qubits (Encoding Comparison)
     qpu_df = df[df["Solver"].str.startswith("EMU")].copy()
     if not qpu_df.empty:
         overhead_df = qpu_df.groupby(["Grid", "Enc"])[["L-Qub", "P-Qub"]].mean().reset_index()
         
-        # Get a sorted list of all unique grids to serve as the master X-axis
-        grids = sorted(overhead_df["Grid"].unique())
-        x = np.arange(len(grids))
+        x = np.arange(len(sorted_grids))
         width = 0.35
         
         fig, ax = plt.subplots(figsize=(12, 6))
         
         for i, enc in enumerate(["radix", "unary"]):
-            # Filter by encoding, set Grid as index, and reindex to the master grid list
-            # This pads missing grid/encoding combinations with NaN so matplotlib doesn't crash
-            enc_data = overhead_df[overhead_df["Enc"] == enc].set_index("Grid").reindex(grids)
+            # Reindex to our complexity-sorted master list
+            enc_data = overhead_df[overhead_df["Enc"] == enc].set_index("Grid").reindex(sorted_grids)
             
             # Plot Logical Qubits
             ax.bar(x + (i*width) - width/4, enc_data["L-Qub"], width/2, 
@@ -56,10 +58,9 @@ def generate_wp2_plots(df: pd.DataFrame, out_dir: str):
                    label=f'{enc} (Physical)', color=sns.color_palette("dark")[i], alpha=0.9)
 
         ax.set_ylabel('Average Qubit Count')
-        ax.set_title('Hardware Overhead: Logical vs. Embedded Physical Qubits')
+        ax.set_title('Hardware Overhead: Logical vs. Embedded Physical Qubits (Sorted by Complexity)')
         ax.set_xticks(x + width / 2)
-        # Rotated labels so the 11 grid names don't overlap
-        ax.set_xticklabels(grids, rotation=45, ha="right")
+        ax.set_xticklabels(sorted_grids, rotation=45, ha="right")
         ax.legend()
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, "wp2_hardware_overhead.png"), dpi=300)
@@ -67,15 +68,17 @@ def generate_wp2_plots(df: pd.DataFrame, out_dir: str):
 
     # 2. Analog Noise Impact: Dynamic Range Vulnerability vs. Chain Breaks
     if not qpu_df.empty:
-        plt.figure(figsize=(8, 6))
+        plt.figure(figsize=(9, 6))
+        # Ensure grid legend is also sorted by complexity
         sns.scatterplot(
             data=qpu_df, 
             x="At-Risk (%)", 
             y="CB (%)", 
             hue="Grid", 
+            hue_order=sorted_grids,
             style="Enc", 
-            s=100, 
-            alpha=0.8
+            s=120, 
+            alpha=0.85
         )
         plt.title("Analog Degradation: Matrix Squashing vs. Chain Failures")
         plt.xlabel("Variables At Risk of DAC Erasure (%)")
@@ -85,22 +88,32 @@ def generate_wp2_plots(df: pd.DataFrame, out_dir: str):
         plt.savefig(os.path.join(out_dir, "wp2_analog_degradation.png"), dpi=300)
         plt.close()
 
-    # 3. Solver Accuracy: Optimality Gap comparison
-    compare_df = df[df["Opt-Gap (%)"].notna()].copy()
+    # 3. Solver Accuracy: Isolating the affect of Precision (Delta P) on Optimality Gap
+    # We isolate only EMU-SA, PTDF, Radix to show a clean story about precision scaling
+    compare_df = df[(df["Solver"] == "EMU-SA") & 
+                    (df["Form"] == "ptdf") & 
+                    (df["Enc"] == "radix") & 
+                    (df["Opt-Gap (%)"].notna()) &
+                    (df["Prec"].isin([10.0, 50.0]))].copy()
+                    
     if not compare_df.empty:
+        # Convert Precision to categorical for clean plotting
+        compare_df["Precision (MW)"] = compare_df["Prec"].astype(str) + " MW"
+        
         plt.figure(figsize=(10, 6))
         sns.barplot(
             data=compare_df, 
             x="Grid", 
+            order=[g for g in sorted_grids if g in compare_df["Grid"].values], # Keep complexity sort
             y="Opt-Gap (%)", 
-            hue="Solver", 
-            palette="viridis"
+            hue="Precision (MW)",
+            palette="Set2"
         )
-        plt.title("Solver Accuracy: Optimality Gap relative to Continuous IP Baseline")
-        plt.ylabel("Cost Deviation from True Minimum (%)")
-        plt.axhline(0, color='red', lw=2, ls='--', label='IP Baseline (0%)')
+        plt.title("Economic Accuracy: The Impact of Discretization Precision on Optimality Gap")
+        plt.ylabel("Cost Deviation from Continuous IP Baseline (%)")
+        plt.axhline(0, color='red', lw=1.5, ls='--', label='IP Global Minimum (0%)')
         plt.xticks(rotation=45, ha="right")
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.legend(title="Discretization Step", bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, "wp2_optimality_gap.png"), dpi=300)
         plt.close()

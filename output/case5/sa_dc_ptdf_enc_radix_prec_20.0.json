@@ -94,9 +94,9 @@
             "status": "Success",
             "solver_name": "neal_simulated_annealing_dc_ptdf",
             "execution_time_seconds": {
-                "total": 1.3832,
+                "total": 2.7935,
                 "formulation_cpu": 0.0031,
-                "sampling_cpu_sa": 1.3228
+                "sampling_cpu_sa": 2.7748
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -114,26 +114,26 @@
                     "qubits_wasted_on_slack": 6,
                     "num_interactions": 301,
                     "density_percent": 92.62,
-                    "offset": 3372376.973839705
+                    "offset": 3091345.5593530624
                 },
                 "hardware_limits": {
-                    "ising_max": 123756.5494,
-                    "ising_min": 119.541014,
-                    "ising_dynamic_range": 1035.26,
+                    "ising_max": 113318.5036,
+                    "ising_min": 109.579263,
+                    "ising_dynamic_range": 1034.12,
                     "ising_at_risk_percent": 51.99,
-                    "max_coefficient_magnitude": 1852788.5607,
-                    "min_coefficient_magnitude": 478.1641,
+                    "max_coefficient_magnitude": 1698139.5139,
+                    "min_coefficient_magnitude": 438.3171,
                     "dac_precision_warning": true
                 },
                 "penalties": {
-                    "balance": 2.4,
+                    "balance": 2.2,
                     "line": {
-                        "line_0": 0.9,
-                        "line_1": 2.4,
-                        "line_2": 0.9,
-                        "line_3": 1.8,
-                        "line_4": 2.4,
-                        "line_5": 1.8
+                        "line_0": 0.825,
+                        "line_1": 2.2,
+                        "line_2": 0.825,
+                        "line_3": 1.65,
+                        "line_4": 2.2,
+                        "line_5": 1.65
                     }
                 }
             },
@@ -149,16 +149,16 @@
                 "num_iterations": 1,
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
-                    "num_reads_requested": 500,
+                    "num_reads_requested": 1000,
                     "num_sweeps_per_read": 5000,
-                    "unique_states_found": 500,
-                    "energy_best": 17393.2,
-                    "energy_mean": 19863.3,
-                    "energy_worst": 27971.82,
-                    "energy_std_dev": 2127.79,
+                    "unique_states_found": 1000,
+                    "energy_best": 17373.77,
+                    "energy_mean": 19701.93,
+                    "energy_worst": 27439.73,
+                    "energy_std_dev": 2205.95,
                     "reads_checked_for_feasibility": 1,
                     "feasible_read_found": true,
-                    "chosen_sample_energy": 17393.200212002383
+                    "chosen_sample_energy": 17373.766861001786
                 }
             },
             "hardware_metrics": {

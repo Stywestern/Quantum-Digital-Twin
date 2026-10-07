@@ -23,7 +23,7 @@ KB_OVER_H_GHZ_PER_K = 20.8366   # k_B / h expressed in GHz per Kelvin
 class Hardware:
     graph: nx.Graph
     name: str = "ideal_zephyr"
-    topology: dict = field(default_factory=lambda: {"type": "zephyr", "shape": [12, 4]})
+    topology: dict = field(default_factory=lambda: {"type": "zephyr", "shape": [15, 4]})
     # Programmable ranges. DEFAULTS ARE ASSUMPTIONS for an Advantage2-like device;
     # from_qpu() overwrites them with the values the real solver reports.
     h_range: tuple = (-4.0, 4.0)
@@ -34,7 +34,7 @@ class Hardware:
 
     # ---- constructors ------------------------------------------------------
     @classmethod
-    def ideal_zephyr(cls, m: int = 12, t: int = 4) -> "Hardware":
+    def ideal_zephyr(cls, m: int = 15, t: int = 4) -> "Hardware":
         import dwave_networkx as dnx
         return cls(graph=dnx.zephyr_graph(m, t), name=f"ideal_zephyr_Z({m},{t})",
                    topology={"type": "zephyr", "shape": [m, t]})

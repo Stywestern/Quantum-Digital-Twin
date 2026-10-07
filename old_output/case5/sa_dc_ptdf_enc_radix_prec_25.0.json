@@ -94,9 +94,9 @@
             "status": "Success",
             "solver_name": "neal_simulated_annealing_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.6083,
-                "formulation_cpu": 0.0028,
-                "sampling_cpu_sa": 0.6048
+                "total": 1.1243,
+                "formulation_cpu": 0.003,
+                "sampling_cpu_sa": 1.1139
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -150,12 +150,15 @@
                 "optimality_gap_percent": 0.0,
                 "sampler_stats": {
                     "num_reads_requested": 500,
-                    "num_sweeps_per_read": 3000,
+                    "num_sweeps_per_read": 5000,
                     "unique_states_found": 500,
                     "energy_best": 17423.63,
-                    "energy_mean": 19448.04,
-                    "energy_worst": 28135.36,
-                    "energy_std_dev": 2156.24
+                    "energy_mean": 19548.31,
+                    "energy_worst": 25061.21,
+                    "energy_std_dev": 2200.84,
+                    "reads_checked_for_feasibility": 1,
+                    "feasible_read_found": true,
+                    "chosen_sample_energy": 17423.625972914044
                 }
             },
             "hardware_metrics": {

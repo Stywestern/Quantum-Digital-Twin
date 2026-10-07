@@ -87,10 +87,10 @@
             "status": "Success",
             "solver_name": "emulated_qpu_sa_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.3343,
-                "formulation_cpu": 0.002,
-                "embedding_cpu": 0.0749,
-                "sampling_analog_sim": 0.2516
+                "total": 0.6194,
+                "formulation_cpu": 0.0019,
+                "embedding_cpu": 0.1482,
+                "sampling_analog_sim": 0.4612
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -108,25 +108,25 @@
                     "qubits_wasted_on_slack": 0,
                     "num_interactions": 10,
                     "density_percent": 100.0,
-                    "offset": 31104.0
+                    "offset": 28512.0
                 },
                 "hardware_limits": {
-                    "ising_max": 2390.0,
-                    "ising_min": 1200.0,
-                    "ising_dynamic_range": 1.99,
+                    "ising_max": 2170.0,
+                    "ising_min": 1100.0,
+                    "ising_dynamic_range": 1.97,
                     "ising_at_risk_percent": 0.0,
-                    "max_coefficient_magnitude": 14380.0,
-                    "min_coefficient_magnitude": 4800.0,
+                    "max_coefficient_magnitude": 13140.0,
+                    "min_coefficient_magnitude": 4400.0,
                     "dac_precision_warning": false
                 },
                 "penalties": {
-                    "balance": 0.96,
+                    "balance": 0.88,
                     "line": {
-                        "line_0": 0.96,
-                        "line_1": 0.72,
-                        "line_2": 0.48,
-                        "line_3": 0.96,
-                        "line_4": 0.96
+                        "line_0": 0.88,
+                        "line_1": 0.66,
+                        "line_2": 0.44,
+                        "line_3": 0.88,
+                        "line_4": 0.88
                     }
                 }
             },
@@ -139,11 +139,11 @@
                 "penalty_line": null
             },
             "hardware_metrics": {
-                "qpu_target": "ideal_zephyr_Z(12,4)",
+                "qpu_target": "ideal_zephyr_Z(15,4)",
                 "topology": {
                     "type": "zephyr",
                     "shape": [
-                        12,
+                        15,
                         4
                     ]
                 },
@@ -156,9 +156,9 @@
                 "multi_qubit_chains": 1,
                 "single_qubit_variables": 4,
                 "total_chain_qubits": 6,
-                "embedding_heuristic_winner": "minorminer_seed1",
-                "hardware_scale_factor": 0.0005893446487505894,
-                "chain_strength_applied": 3393.6,
+                "embedding_heuristic_winner": "minorminer_seed0",
+                "hardware_scale_factor": 0.000642921435000643,
+                "chain_strength_applied": 3110.7999999999997,
                 "dac_resolution_bits": 5,
                 "dac_step_granularity": 0.03125,
                 "ice_sigma_h": 0.01,
@@ -167,18 +167,18 @@
             "algorithmic_metrics": {
                 "framework": "hardware_aware_analog_simulation",
                 "sampler_stats": {
-                    "num_reads_requested": 500,
+                    "num_reads_requested": 1000,
                     "num_sweeps_per_read": 5000,
-                    "unique_states_found": 500,
-                    "raw_energy_best_logical": 3864.0,
-                    "raw_energy_mean_logical": 4153.0,
-                    "sds_energy_best_logical": 3864.0,
-                    "sds_energy_mean_logical": 4153.0,
+                    "unique_states_found": 1000,
+                    "raw_energy_best_logical": 3792.0,
+                    "raw_energy_mean_logical": 4069.5,
+                    "sds_energy_best_logical": 3792.0,
+                    "sds_energy_mean_logical": 4069.5,
                     "energy_improvement_delta": 0.0,
                     "mean_chain_break_fraction": 0.0,
-                    "postprocess_physical_flips": 1,
+                    "postprocess_physical_flips": 0,
                     "postprocess_logical_flips": 0,
-                    "total_flips_executed": 1
+                    "total_flips_executed": 0
                 }
             }
         }

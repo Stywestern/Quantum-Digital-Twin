@@ -76,9 +76,9 @@
             "status": "Success",
             "solver_name": "pandapower_dc_interior_point",
             "execution_time_seconds": {
-                "total": 0.1747,
+                "total": 0.1623,
                 "qpu_master": 0.0,
-                "cpu_subproblem": 0.1747
+                "cpu_subproblem": 0.1623
             },
             "problem_complexity": {
                 "num_continuous_variables": 5,
