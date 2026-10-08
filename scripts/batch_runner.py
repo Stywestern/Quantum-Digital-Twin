@@ -28,12 +28,12 @@ if __name__ == "__main__":
         #pn.case9,          # 9 buses
         #pn.case14,         # 14 buses
         #pn.case24_ieee_rts,# 24-bus IEEE Reliability Test System
-        pn.case30,         # 30 buses
-        pn.case39,         # 39 buses (New England)
-        pn.case57,         # 57 buses
+        #pn.case30,         # 30 buses
+        #pn.case39,         # 39 buses (New England)
+        #pn.case57,         # 57 buses
         
         # --- Medium / The Topological Cliff (100 - 300 buses) ---
-        pn.case89pegase,   # 89 buses (European Pegase subset)
+        #pn.case89pegase,   # 89 buses (European Pegase subset)
         pn.case118,        # 118 buses
         pn.case145,        # 145 buses
         pn.case300,        # 300 buses
