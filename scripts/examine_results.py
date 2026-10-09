@@ -88,35 +88,145 @@ def generate_wp2_plots(df: pd.DataFrame, out_dir: str):
         plt.savefig(os.path.join(out_dir, "wp2_analog_degradation.png"), dpi=300)
         plt.close()
 
-    # 3. Solver Accuracy: Isolating the affect of Precision (Delta P) on Optimality Gap
-    # We isolate only EMU-SA, PTDF, Radix to show a clean story about precision scaling
-    compare_df = df[(df["Solver"] == "EMU-SA") & 
-                    (df["Form"] == "ptdf") & 
-                    (df["Enc"] == "radix") & 
-                    (df["Opt-Gap (%)"].notna()) &
-                    (df["Prec"].isin([10.0, 50.0]))].copy()
-                    
+    # 3. Solver Accuracy: Impact of Precision on Optimality Gap
+    # Compare 10, 20, and 50 MW precision; exclude custom test grids.
+    excluded_grids = ["3-Bus Low Gen", "4-Bus High Gen"]
+
+    compare_df = df[
+        (df["Solver"] == "EMU-SA") &
+        (df["Form"] == "ptdf") &
+        (df["Enc"] == "radix") &
+        (df["Opt-Gap (%)"].notna()) &
+        (df["Prec"].isin([10.0, 20.0, 50.0])) &
+        (~df["Grid"].isin(excluded_grids))
+    ].copy()
+
     if not compare_df.empty:
-        # Convert Precision to categorical for clean plotting
-        compare_df["Precision (MW)"] = compare_df["Prec"].astype(str) + " MW"
-        
+        # Make every optimality gap non-negative
+        compare_df["Opt-Gap (%)"] = compare_df["Opt-Gap (%)"].abs()
+
+        # Convert precision to categorical labels
+        precision_order = ["10.0 MW", "20.0 MW", "50.0 MW"]
+        compare_df["Precision (MW)"] = (
+            compare_df["Prec"].map({
+                10.0: "10.0 MW",
+                20.0: "20.0 MW",
+                50.0: "50.0 MW"
+            })
+        )
+
         plt.figure(figsize=(10, 6))
         sns.barplot(
-            data=compare_df, 
-            x="Grid", 
-            order=[g for g in sorted_grids if g in compare_df["Grid"].values], # Keep complexity sort
-            y="Opt-Gap (%)", 
+            data=compare_df,
+            x="Grid",
+            order=[
+                g for g in sorted_grids
+                if g in compare_df["Grid"].values
+                and g not in excluded_grids
+            ],
+            y="Opt-Gap (%)",
             hue="Precision (MW)",
+            hue_order=precision_order,
             palette="Set2"
         )
-        plt.title("Economic Accuracy: The Impact of Discretization Precision on Optimality Gap")
-        plt.ylabel("Cost Deviation from Continuous IP Baseline (%)")
-        plt.axhline(0, color='red', lw=1.5, ls='--', label='IP Global Minimum (0%)')
+
+        plt.title(
+            "Economic Accuracy: Impact of Discretization Precision "
+            "on Absolute Optimality Gap"
+        )
+        plt.ylabel("Absolute Cost Deviation from Continuous IP Baseline (%)")
+        plt.axhline(
+            0, color="red", lw=1.5, ls="--",
+            label="IP Global Minimum (0%)"
+        )
         plt.xticks(rotation=45, ha="right")
-        plt.legend(title="Discretization Step", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.legend(
+            title="Discretization Step",
+            bbox_to_anchor=(1.05, 1),
+            loc="upper left"
+        )
         plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "wp2_optimality_gap.png"), dpi=300)
+        plt.savefig(
+            os.path.join(out_dir, "wp2_optimality_gap.png"),
+            dpi=300
+        )
         plt.close()
+    
+    # 4. Hardware Vulnerability vs. Optimality Gap
+    risk_col = "At-Risk (%)"
+    gap_col = "Opt-Gap (%)"
+
+    excluded_grids = ["3-Bus Low Gen", "4-Bus High Gen"]
+
+    risk_df = df[
+        df["Solver"].str.startswith("EMU", na=False) &
+        (df["Form"] == "ptdf") &
+        (df["Enc"] == "radix") &
+        df[risk_col].notna() &
+        df[gap_col].notna() &
+        (~df["Grid"].isin(excluded_grids))
+    ].copy()
+
+    if not risk_df.empty:
+        risk_df[gap_col] = risk_df[gap_col].abs()
+
+        # Average repeated runs for each grid/configuration
+        group_cols = ["Grid", "Solver", "Form", "Enc", "Prec"]
+        plot_df = (
+            risk_df.groupby(group_cols, dropna=False)
+            .agg({
+                risk_col: "mean",
+                gap_col: "mean"
+            })
+            .reset_index()
+        )
+
+        corr = (
+            plot_df[risk_col].corr(plot_df[gap_col])
+            if len(plot_df) >= 2 else np.nan
+        )
+
+        plt.figure(figsize=(10, 6))
+
+        # Only radix + PTDF data reaches this plot
+        sns.scatterplot(
+            data=plot_df,
+            x=risk_col,
+            y=gap_col,
+            hue="Grid",
+            hue_order=[
+                g for g in sorted_grids
+                if g in plot_df["Grid"].values
+            ],
+            s=120,
+            alpha=0.85
+        )
+
+        if plot_df[risk_col].nunique() >= 2:
+            sns.regplot(
+                data=plot_df,
+                x=risk_col,
+                y=gap_col,
+                scatter=False,
+                ci=None,
+                color="black",
+                line_kws={"linestyle": "--", "linewidth": 1.5}
+            )
+
+        plt.title(
+            "Hardware Vulnerability vs. Absolute Optimality Gap"
+            + (f" (Pearson r = {corr:.2f})"
+               if not np.isnan(corr) else "")
+        )
+        plt.xlabel("QUBO Coefficients at Risk of DAC Erasure (%)")
+        plt.ylabel("Absolute Optimality Gap (%)")
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(out_dir, "wp2_hardware_risk_vs_optgap.png"),
+            dpi=300
+        )
+        plt.close()
+
 
 
 def aggregate_all_results():

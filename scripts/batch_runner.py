@@ -5,10 +5,9 @@ warnings.filterwarnings("ignore")
 os.environ["PYTHONWARNINGS"] = "ignore"
 logging.getLogger().setLevel(logging.ERROR)
 
-
 import itertools
 from tqdm import tqdm
-from scripts.pf_opf_annealing_benchmark import run_pipeline
+from scripts.opf_annealing_benchmark import run_pipeline
 
 # Import your grid generators
 import pandapower.networks as pn
@@ -33,10 +32,10 @@ if __name__ == "__main__":
         #pn.case57,         # 57 buses
         
         # --- Medium / The Topological Cliff (100 - 300 buses) ---
-        #pn.case89pegase,   # 89 buses (European Pegase subset)
+        pn.case89pegase,   # 89 buses (European Pegase subset)
         pn.case118,        # 118 buses
-        pn.case145,        # 145 buses
-        pn.case300,        # 300 buses
+        #pn.case145,        # 145 buses
+        #pn.case300,        # 300 buses
         
         # --- Large / Unfeasible Mathematical Baselines (1000+ buses) ---
         # These will instantly fail embedding on current quantum hardware, 

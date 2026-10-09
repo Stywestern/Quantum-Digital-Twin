@@ -72,7 +72,7 @@ def embed_clique(src: nx.Graph, tgt: nx.Graph, verbose: bool = True):
  
  
 def find_embeddings(bqm, hardware, methods=("clique", "minorminer"), seeds=(0, 1, 2),
-                    timeout: float = 120.0, verbose: bool = True, density_skip_minorminer: float = 0.9,
+                    timeout: float = 36000.0, verbose: bool = True, density_skip_minorminer: float = 0.9,
                     skip_minorminer_if_clique_found: bool = False) -> dict:
     """Returns {label: {"embedding", "stats", "seconds"}} for every method/seed that succeeded.
  

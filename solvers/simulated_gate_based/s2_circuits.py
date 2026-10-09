@@ -204,7 +204,7 @@ def resource_estimate(prob: IsingProblem, p: int, target_hardware: str = "ibm_he
     # Base logical counts (all-to-all assumption)
     logical_cnot = 2 * m * p
     
-    if target_hardware == "ibm_heavy_hex":
+    if target_hardware in ["ibm_heavy_hex", "ibm_eagle"]:
         # Heavy-Hex routing heuristic: 
         # A dense graph of size N routed on a planar lattice requires O(N) SWAP layers.
         # Each SWAP is 3 physical CNOTs.
