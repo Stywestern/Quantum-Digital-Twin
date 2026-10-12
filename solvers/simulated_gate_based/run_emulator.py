@@ -4,6 +4,13 @@ Splits QAOA into two dedicated solvers:
   - IdealQAOA: Fast statevector simulation (Numpy backend), all-to-all connectivity baseline.
   - EmuQAOA:   Angle transfer to a noisy gate-level emulator (PennyLane density matrix),
                modeling IBM Heavy-Hex routing, CNOT depolarizing errors, and readout noise.
+
+CHANGE vs previous version (angle persistence):
+  * IdealQAOA now saves its final-depth angles ("trained_optimal_angles", "trained_depth") in the
+    qaoa metadata, next to the already-saved "energy_scale".
+  * EmuQAOA accepts fixed_params (+ optional fixed_energy_scale). When given, it SKIPS training and
+    transfers those angles into the noisy circuit; otherwise it retrains exactly as before.
+    The angles are noise-unaware: they are optimal for the ideal circuit, not for the noisy one.
 """
 from __future__ import annotations
 
@@ -145,13 +152,16 @@ class IdealQAOA(_BaseQAOASolver):
                 "depths": [r.p for r, _ in sweep],
                 "per_depth": [{"p": r.p, "approx_ratio": r.approx_ratio, "p_ground": r.p_ground,
                                "n_evals": r.n_evals, "converged": r.success} for r, _ in sweep],
+                # --- angle persistence: EmuQAOA (or any later run) can transfer these ---
+                "trained_optimal_angles": res.params.tolist(),   # [gammas..., betas...], length 2*trained_depth
+                "trained_depth": res.p,
                 "approx_ratio": res.approx_ratio,
                 "approx_ratio_random_baseline": res.approx_ratio_random,
                 "p_ground_exact": res.p_ground,
                 "p_ground_sampled": stats["p_ground_sampled"],
                 "feasible_fraction": stats["feasible_fraction"],
                 "feasible_found": stats["feasible_found"],
-                "energy_scale": land.scale,
+                "energy_scale": land.scale,          # angles are only valid for THIS normalised QUBO
                 "total_circuit_evals": int(sum(r.n_evals for r, _ in sweep)),
                 "optimizer": self.method,
                 "backend": "numpy_statevector",
@@ -181,22 +191,32 @@ class EmuQAOA(_BaseQAOASolver):
     """Hardware-aware QAOA emulator modeling physical gate-based chips.
 
     Workflow:
-      1. Solves for optimal (gamma, beta) angles using the fast NumPy simulator.
+      1. Angles: transferred from a previous ideal run (fixed_params), or trained with the fast
+         NumPy simulator if fixed_params is None.
       2. Transfers parameters into a PennyLane density matrix (`default.mixed`).
       3. Applies heavy-hex routing SWAP inflation, two-qubit depolarizing noise,
          and readout bit-flip channels.
       4. Extracted shots undergo Steepest Descent error mitigation to fix readout/CNOT flips.
+
+    fixed_params       : flat [gammas..., betas...] vector, e.g. IdealQAOA's "trained_optimal_angles".
+                         Noise-UNAWARE angles (optimal for the ideal circuit, not for the noisy one).
+    fixed_energy_scale : IdealQAOA's "energy_scale". If given, it is compared with this instance's
+                         scale as a guard against transferring angles trained on a different QUBO
+                         (different grid, precision, penalties or encoding).
     """
 
     def __init__(self, formulation="dc_ptdf", mw_precision=20.0, p=2, p_sweep=None,
-                 hardware_preset="ibm_eagle", shots=2000, method="COBYLA", maxiter=200,
-                 n_restarts=1, dt=0.75, seed=0, max_qubits=12, max_decode=None, **kwargs):
+                 hardware_preset="ibm_eagle", shots=1000, method="COBYLA", maxiter=200,
+                 n_restarts=1, dt=0.75, seed=0, max_qubits=24, max_decode=None,
+                 fixed_params=None, fixed_energy_scale=None, **kwargs):
         super().__init__(
             formulation=formulation, mw_precision=mw_precision, p=p, p_sweep=p_sweep,
             shots=shots, method=method, maxiter=maxiter, n_restarts=n_restarts, dt=dt,
             seed=seed, max_qubits=max_qubits, max_decode=max_decode, **kwargs
         )
         self.hardware_preset = hardware_preset
+        self.fixed_params = fixed_params
+        self.fixed_energy_scale = fixed_energy_scale
 
     def solve_opf(self, net):
         # We need the index sampler and post-processor specifically for Emulation
@@ -207,7 +227,7 @@ class EmuQAOA(_BaseQAOASolver):
         status, cost, dispatch, sgen_dispatch, slack_dispatch = "Success", None, {}, {}, {}
         feasibility, complexity, qaoa_meta, resources, n_qubits = None, {}, {}, {}, 0
         form_t = opt_t = samp_t = 0.0
-
+        
         try:
             # 1. Formulation & Landscape
             t0 = time.time()
@@ -224,86 +244,124 @@ class EmuQAOA(_BaseQAOASolver):
             prob = IsingProblem.from_bqm(bqm)
             land = Landscape(prob, max_qubits=self.max_qubits)
 
-            # 2. Angle Training via Parameter Transfer (Fast NumPy backend)
+            # 2. Angles: transfer from the ideal run if provided, otherwise train (numpy backend)
             t1 = time.time()
-            p_values = self.p_sweep or (self.p,)
-            sweep = depth_sweep(land, p_values, backend="numpy", method=self.method,
-                                maxiter=self.maxiter, n_restarts=self.n_restarts,
-                                seed=self.seed, dt=self.dt)
+            if self.fixed_params is not None:
+                params = np.asarray(self.fixed_params, dtype=float)
+                if params.ndim != 1 or params.size == 0 or params.size % 2:
+                    raise ValueError("fixed_params must be a flat [gammas..., betas...] vector of even length")
+                p_used = params.size // 2
+                expected_p = (self.p_sweep or (self.p,))[-1]
+                if p_used != expected_p:
+                    raise ValueError(f"fixed_params encode depth p={p_used}, but this solver is configured "
+                                     f"for final depth p={expected_p}")
+                if (self.fixed_energy_scale is not None
+                        and abs(land.scale - self.fixed_energy_scale) > 1e-6 * abs(self.fixed_energy_scale)):
+                    raise ValueError(
+                        f"energy-scale mismatch (this QUBO {land.scale:.6g} vs angles trained on "
+                        f"{self.fixed_energy_scale:.6g}): the angles belong to a different QUBO; "
+                        f"re-run the ideal solver for this configuration")
+                # ideal-circuit metrics at the transferred angles (cheap numpy evaluation)
+                circ_ideal = make_circuit(land, p_used, backend="numpy")
+                pr_ideal = circ_ideal.probs(params)
+                ideal_ar = land.approx_ratio(float(pr_ideal @ land.E_norm))
+                ideal_pg = land.p_ground(pr_ideal)
+                depths, angles_source = [p_used], "transferred_from_ideal_run"
+            else:
+                p_values = self.p_sweep or (self.p,)
+                sweep = depth_sweep(land, p_values, backend="numpy", method=self.method,
+                                    maxiter=self.maxiter, n_restarts=self.n_restarts,
+                                    seed=self.seed, dt=self.dt)
+                res, _ = sweep[-1]
+                params, p_used = res.params, res.p
+                ideal_ar, ideal_pg = res.approx_ratio, res.p_ground
+                depths, angles_source = [r.p for r, _ in sweep], "retrained_noise_unaware"
             opt_t = time.time() - t1
-            res, _ = sweep[-1]
 
             # 3. Instantiate Noisy Hardware-Mapped Circuit
             circ_emu = make_circuit(
-                land, res.p, backend="pennylane", device="default.mixed",
+                land, p_used, backend="pennylane", device="default.mixed",
                 cost_layer="gates", hardware_preset=self.hardware_preset
             )
 
             # 4. Sampling & Error Mitigation
             t2 = time.time()
-            
+
             # 4a. Raw Measurement (Hardware readouts before classical fixes)
-            uniq_raw, cnt_raw = sample_indices(circ_emu, res.params, shots=self.shots, seed=self.seed)
-            
+            uniq_raw, cnt_raw = sample_indices(circ_emu, params, shots=self.shots, seed=self.seed)
+
             raw_energies = land.raw_energy(uniq_raw)
             best_raw_idx = uniq_raw[np.argmin(raw_energies)]
             best_raw_energy = float(np.min(raw_energies))
-            
+
             # 4b. Steepest Descent Mitigation
             uniq_fixed, cnt_fixed, total_flips = postprocess_shots(land, uniq_raw, cnt_raw)
-            
+
             # 4c. Decode the Mitigated Shots
-            # (We bypass the internal sampler in evaluate_samples by overwriting it momentarily, 
-            # or we just manually decode the fixed shots here as evaluate_samples does)
             order = np.argsort(land.raw_energy(uniq_fixed))
-            if self.max_decode: order = order[:self.max_decode]
-            
+            if self.max_decode:
+                order = order[:self.max_decode]
+
             best_feasible, best_any = None, None
             feas_shots, decoded_shots, n_decoded = 0, 0, 0
-            
+
             for j in order:
                 sample = land.index_to_sample(int(uniq_fixed[j]))
                 d_p, d_sgen, d_slack, d_cost, d_feas = self._decode_solution(sample, net)
                 n_decoded += 1
                 decoded_shots += int(cnt_fixed[j])
-                
+
                 row = {"dispatch": d_p, "sgen_dispatch": d_sgen, "slack_dispatch": d_slack, "cost": d_cost,
-                       "feasibility": d_feas, "qubo_energy": float(land.raw_energy(uniq_fixed[j])), "shots": int(cnt_fixed[j])}
-                
-                if best_any is None: best_any = row
+                       "feasibility": d_feas, "qubo_energy": float(land.raw_energy(uniq_fixed[j])),
+                       "shots": int(cnt_fixed[j])}
+
+                if best_any is None:
+                    best_any = row
                 if d_feas["is_feasible"]:
                     feas_shots += int(cnt_fixed[j])
-                    if best_feasible is None: best_feasible = row
-            
+                    if best_feasible is None:
+                        best_feasible = row
+
             samp_t = time.time() - t2
 
             chosen = best_feasible or best_any
             if best_feasible is None:
                 f = chosen["feasibility"]
                 status = (f"Infeasible: no feasible sample among {n_decoded} decoded unique "
-                          f"samples under {self.hardware_preset} noise (balance_ok={f['balance_ok']}, lines_ok={f['lines_ok']})")
+                          f"samples under {self.hardware_preset} noise (balance_ok={f['balance_ok']}, "
+                          f"lines_ok={f['lines_ok']})")
 
             dispatch, sgen_dispatch = chosen["dispatch"], chosen["sgen_dispatch"]
             slack_dispatch, cost, feasibility = chosen["slack_dispatch"], chosen["cost"], chosen["feasibility"]
-            
+
             # Calculate P(ground) for both sets
             p_ground_raw = float(cnt_raw[np.isin(uniq_raw, land.ground)].sum() / self.shots)
             p_ground_fixed = float(cnt_fixed[np.isin(uniq_fixed, land.ground)].sum() / self.shots)
 
-            resources = resource_estimate(prob, res.p, target_hardware=self.hardware_preset)
-            
+            resources = resource_estimate(prob, p_used, target_hardware=self.hardware_preset)
+
             # 5. Metadata Construction (Tracking Pre/Post Mitigation)
+            resources = resource_estimate(prob, p_used, target_hardware=self.hardware_preset)
+            raw_feas_shots = 0
+            for i, u_idx in enumerate(uniq_raw):
+                sample = land.index_to_sample(int(u_idx))
+                _, _, _, _, d_feas = self._decode_solution(sample, net)
+                if d_feas["is_feasible"]:
+                    raw_feas_shots += int(cnt_raw[i])
+
             qaoa_meta = {
-                "depths": [r.p for r, _ in sweep],
-                "trained_optimal_angles": res.params.tolist(),
-                "ideal_approx_ratio": res.approx_ratio,
-                "ideal_p_ground": res.p_ground,
-                
+                "depths": depths,
+                "angles_source": angles_source,
+                "trained_optimal_angles": params.tolist(),
+                "ideal_approx_ratio": ideal_ar,
+                "ideal_p_ground": ideal_pg,
+
                 # Mitigation Tracking Block
                 "raw_readout": {
                     "p_ground_sampled": p_ground_raw,
                     "lowest_energy_sampled": best_raw_energy,
-                    "unique_states_measured": int(len(uniq_raw))
+                    "unique_states_measured": int(len(uniq_raw)),
+                    "feasible_fraction": raw_feas_shots / self.shots
                 },
                 "mitigated_readout": {
                     "p_ground_sampled": p_ground_fixed,
@@ -313,7 +371,7 @@ class EmuQAOA(_BaseQAOASolver):
                     "feasible_fraction": feas_shots / decoded_shots if decoded_shots else 0.0,
                     "feasible_found": best_feasible is not None
                 },
-                
+
                 "noise_model": getattr(circ_emu, "noise", {}),
                 "energy_scale": land.scale,
                 "optimizer": self.method,
@@ -327,12 +385,21 @@ class EmuQAOA(_BaseQAOASolver):
             "qpu_target": f"noisy_{self.hardware_preset}_heavy_hex",
             "logical_qubits": n_qubits,
             "physical_qubits": resources.get("qubits", n_qubits),
-            "circuit_depth": resources.get("depth_estimate", 0),
+            "circuit_depth": resources.get("circuit_depth", 0),
             "logical_two_qubit_gates": resources.get("logical_two_qubit_gates", 0),
             "physical_two_qubit_gates": resources.get("physical_two_qubit_gates", 0),
             "routing_overhead_multiplier": resources.get("routing_overhead_multiplier", 1.0),
-            "noise_profile": getattr(circ_emu, "noise", {}) if 'circ_emu' in locals() else {},
+            "noise_profile": getattr(circ_emu, "noise", {}) if circ_emu else {},
             "resources": resources,
+            "advanced_metrics": {
+                "estimated_success_probability": resources.get("fidelity", {}).get("estimated_success_probability"),
+                "execution_duration_ns": resources.get("timing", {}).get("execution_duration_ns"),
+                "coherence_saturation_percent": resources.get("timing", {}).get("coherence_saturation_pct"),
+                "max_parallel_cnots": resources.get("concurrency", {}).get("max_parallel_cnots"),
+                "avg_parallel_cnots": resources.get("concurrency", {}).get("avg_parallel_cnots"),
+                "angle_l1_norm": float(np.sum(np.abs(params))) if params is not None else None,
+                "angle_max_magnitude": float(np.max(np.abs(params))) if params is not None else None
+            }
         }
 
         return self._build_opf_payload(

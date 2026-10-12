@@ -1,0 +1,133 @@
+{
+    "problem_parameters": {
+        "network_name": "case5",
+        "topology": {
+            "buses": 5,
+            "branches": 6,
+            "lines": 6,
+            "trafos": 0,
+            "is_connected": true
+        },
+        "dispatchable_assets": {
+            "total_count": 4,
+            "generators": 3,
+            "external_grids": 1,
+            "capacity_max_mw": 1360.0,
+            "capacity_min_mw": 0.0
+        },
+        "demand": {
+            "load_count": 3,
+            "total_load_mw": 1000.0,
+            "static_gen_mw": 170.0,
+            "net_active_demand_mw": 830.0
+        },
+        "feasibility_precheck": {
+            "capacity_sufficient": true
+        },
+        "linear_costs_eur_per_mw": {
+            "gen_0": 14.0,
+            "sgen_0": 15.0,
+            "gen_1": 30.0,
+            "ext_grid_0": 40.0,
+            "gen_2": 10.0
+        }
+    },
+    "opf_results": {
+        "solution": {
+            "cost_eur_per_hr": null,
+            "generator_dispatch_mw": {},
+            "static_generator_dispatch_mw": {},
+            "slack_dispatch_mw": {},
+            "grid_state": {
+                "max_line_loading_percent": null,
+                "max_voltage_pu": 1.0,
+                "min_voltage_pu": 1.0,
+                "feasibility": null
+            }
+        },
+        "metadata": {
+            "status": "Failed: Unable to allocate 1.00 TiB for an array with shape (2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2) and data type complex128",
+            "solver_name": "emu_qaoa_ibm_eagle_dc_ptdf",
+            "execution_time_seconds": {
+                "total": 178.1712,
+                "formulation_cpu": 0.0031,
+                "parameter_optimisation": 177.4916,
+                "sampling_and_decoding": 0.0
+            },
+            "problem_complexity": {
+                "formulation": "dc_ptdf",
+                "encoding": "radix",
+                "classical_domain_input": {
+                    "continuous_variables": 5,
+                    "equality_constraints": 1,
+                    "inequality_constraints": 4
+                },
+                "quantum_domain_qubo": {
+                    "total_logical_qubits": 18,
+                    "qubits_used_for_variables": 14,
+                    "qubits_used_for_dispatch": 14,
+                    "qubits_used_for_angles": 0,
+                    "qubits_wasted_on_slack": 4,
+                    "num_interactions": 141,
+                    "density_percent": 92.16,
+                    "offset": 1236538.223741225
+                },
+                "hardware_limits": {
+                    "ising_max": 43153.4865,
+                    "ising_min": 273.948158,
+                    "ising_dynamic_range": 157.52,
+                    "ising_at_risk_percent": 15.72,
+                    "max_coefficient_magnitude": 583796.5046,
+                    "min_coefficient_magnitude": 1095.7926,
+                    "dac_precision_warning": true
+                },
+                "penalties": {
+                    "balance": 0.88,
+                    "line": {
+                        "line_0": 0.33,
+                        "line_1": 0.88,
+                        "line_2": 0.33,
+                        "line_3": 0.66,
+                        "line_4": 0.88,
+                        "line_5": 0.66
+                    }
+                }
+            },
+            "qubo_parameters": {
+                "mw_precision": 50.0,
+                "penalty_balance": null,
+                "penalty_line": null,
+                "seed": 0
+            },
+            "algorithmic_metrics": {
+                "framework": "gate_based_qaoa",
+                "num_iterations": 1,
+                "qaoa": {}
+            },
+            "hardware_metrics": {
+                "qpu_target": "noisy_ibm_eagle_heavy_hex",
+                "logical_qubits": 18,
+                "physical_qubits": 18,
+                "circuit_depth": 0,
+                "logical_two_qubit_gates": 0,
+                "physical_two_qubit_gates": 0,
+                "routing_overhead_multiplier": 1.0,
+                "noise_profile": {
+                    "p1": 0.0003,
+                    "p2": 0.1273,
+                    "readout": 0.015
+                },
+                "resources": {},
+                "advanced_metrics": {
+                    "estimated_success_probability": null,
+                    "execution_duration_ns": null,
+                    "coherence_saturation_percent": null,
+                    "max_parallel_cnots": null,
+                    "avg_parallel_cnots": null,
+                    "angle_l1_norm": 3.44543413168942,
+                    "angle_max_magnitude": 2.1768325702102973
+                }
+            }
+        }
+    }
+}

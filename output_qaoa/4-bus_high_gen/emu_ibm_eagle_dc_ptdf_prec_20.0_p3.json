@@ -1,0 +1,233 @@
+{
+    "problem_parameters": {
+        "network_name": "4-Bus High Gen",
+        "topology": {
+            "buses": 4,
+            "branches": 5,
+            "lines": 5,
+            "trafos": 0,
+            "is_connected": true
+        },
+        "dispatchable_assets": {
+            "total_count": 4,
+            "generators": 3,
+            "external_grids": 1,
+            "capacity_max_mw": 340.0,
+            "capacity_min_mw": 0.0
+        },
+        "demand": {
+            "load_count": 3,
+            "total_load_mw": 180.0,
+            "static_gen_mw": 0.0,
+            "net_active_demand_mw": 180.0
+        },
+        "feasibility_precheck": {
+            "capacity_sufficient": true
+        },
+        "linear_costs_eur_per_mw": {
+            "ext_grid_0": 40.0,
+            "gen_0": 30.0,
+            "gen_1": 20.0,
+            "gen_2": 10.0
+        }
+    },
+    "opf_results": {
+        "solution": {
+            "cost_eur_per_hr": 3000.0,
+            "generator_dispatch_mw": {
+                "0": {
+                    "p_mw": 20.0
+                },
+                "1": {
+                    "p_mw": 80.0
+                },
+                "2": {
+                    "p_mw": 80.0
+                }
+            },
+            "static_generator_dispatch_mw": {},
+            "slack_dispatch_mw": {
+                "0": {
+                    "p_mw": 0.0
+                }
+            },
+            "grid_state": {
+                "max_line_loading_percent": 20.918,
+                "max_voltage_pu": 1.0,
+                "min_voltage_pu": 1.0,
+                "feasibility": {
+                    "total_generation_mw": 180.0,
+                    "total_load_mw": 180.0,
+                    "raw_imbalance_mw": 0.0,
+                    "raw_slack_dispatch_mw": 0.0,
+                    "cost_raw_dispatch_eur": 3000.0,
+                    "max_line_violation_mw": 0.0,
+                    "tolerance_mw": 20.0,
+                    "balance_ok": true,
+                    "lines_ok": true,
+                    "bounds_ok": true,
+                    "is_feasible": true,
+                    "line_flows_mw": {
+                        "line_0": 7.5,
+                        "line_1": -12.5,
+                        "line_2": 2.5,
+                        "line_3": 2.5,
+                        "line_4": -5.0
+                    },
+                    "bus_angles_rad": {
+                        "0": 0.0,
+                        "1": -0.001418,
+                        "2": 0.000945,
+                        "3": 0.000473
+                    }
+                }
+            }
+        },
+        "metadata": {
+            "status": "Success",
+            "solver_name": "emu_qaoa_ibm_eagle_dc_ptdf",
+            "execution_time_seconds": {
+                "total": 737.7071,
+                "formulation_cpu": 0.002,
+                "parameter_optimisation": 22.9676,
+                "sampling_and_decoding": 714.6445
+            },
+            "problem_complexity": {
+                "formulation": "dc_ptdf",
+                "encoding": "radix",
+                "classical_domain_input": {
+                    "continuous_variables": 4,
+                    "equality_constraints": 1,
+                    "inequality_constraints": 10
+                },
+                "quantum_domain_qubo": {
+                    "total_logical_qubits": 12,
+                    "qubits_used_for_variables": 12,
+                    "qubits_used_for_dispatch": 12,
+                    "qubits_used_for_angles": 0,
+                    "qubits_wasted_on_slack": 0,
+                    "num_interactions": 66,
+                    "density_percent": 100.0,
+                    "offset": 71280.0
+                },
+                "hardware_limits": {
+                    "ising_max": 1760.0,
+                    "ising_min": 40.0,
+                    "ising_dynamic_range": 44.0,
+                    "ising_at_risk_percent": 1.28,
+                    "max_coefficient_magnitude": 27760.0,
+                    "min_coefficient_magnitude": 1760.0,
+                    "dac_precision_warning": false
+                },
+                "penalties": {
+                    "balance": 2.2,
+                    "line": {
+                        "line_0": 2.2,
+                        "line_1": 1.65,
+                        "line_2": 1.1,
+                        "line_3": 2.2,
+                        "line_4": 2.2
+                    }
+                }
+            },
+            "qubo_parameters": {
+                "mw_precision": 20.0,
+                "penalty_balance": null,
+                "penalty_line": null,
+                "seed": 0
+            },
+            "algorithmic_metrics": {
+                "framework": "gate_based_qaoa",
+                "num_iterations": 1,
+                "qaoa": {
+                    "depths": [
+                        1,
+                        2,
+                        3
+                    ],
+                    "angles_source": "retrained_noise_unaware",
+                    "trained_optimal_angles": [
+                        0.5440384267003209,
+                        1.7879023026680934,
+                        3.4153937589999983,
+                        -0.2837012493099534,
+                        -0.09849421971854423,
+                        -0.04947172879630708
+                    ],
+                    "ideal_approx_ratio": 0.970701473800558,
+                    "ideal_p_ground": 0.0021967129262455455,
+                    "raw_readout": {
+                        "p_ground_sampled": 0.0005,
+                        "lowest_energy_sampled": 2999.9999999999927,
+                        "unique_states_measured": 1589,
+                        "feasible_fraction": 0.3985
+                    },
+                    "mitigated_readout": {
+                        "p_ground_sampled": 0.038,
+                        "lowest_energy_sampled": 2999.9999999999927,
+                        "unique_states_collapsed": 485,
+                        "total_hardware_errors_fixed": 2932,
+                        "feasible_fraction": 1.0,
+                        "feasible_found": true
+                    },
+                    "noise_model": {
+                        "p1": 0.0003,
+                        "p2": 0.1039,
+                        "readout": 0.015
+                    },
+                    "energy_scale": 7957.185432048194,
+                    "optimizer": "Powell",
+                    "backend": "pennylane_noisy_ibm_eagle"
+                }
+            },
+            "hardware_metrics": {
+                "qpu_target": "noisy_ibm_eagle_heavy_hex",
+                "logical_qubits": 12,
+                "physical_qubits": 12,
+                "circuit_depth": 427,
+                "logical_two_qubit_gates": 396,
+                "physical_two_qubit_gates": 4115,
+                "routing_overhead_multiplier": 10.39,
+                "noise_profile": {
+                    "p1": 0.0003,
+                    "p2": 0.1039,
+                    "readout": 0.015
+                },
+                "resources": {
+                    "qubits": 12,
+                    "p": 3,
+                    "logical_zz_terms": 66,
+                    "logical_single_qubit_gates": 84,
+                    "logical_two_qubit_gates": 396,
+                    "physical_single_qubit_gates": 2827,
+                    "physical_two_qubit_gates": 4115,
+                    "routing_overhead_multiplier": 10.39,
+                    "circuit_depth": 427,
+                    "depth_estimate": 427,
+                    "target_hardware": "ibm_eagle",
+                    "concurrency": {
+                        "max_parallel_cnots": 6,
+                        "avg_parallel_cnots": 4.71,
+                        "color_layers": 14
+                    },
+                    "timing": {
+                        "execution_duration_ns": 126995.0,
+                        "coherence_saturation_pct": 126.99
+                    },
+                    "fidelity": {
+                        "estimated_success_probability": 3.905531320247588e-19
+                    }
+                },
+                "advanced_metrics": {
+                    "estimated_success_probability": 3.905531320247588e-19,
+                    "execution_duration_ns": 126995.0,
+                    "coherence_saturation_percent": 126.99,
+                    "max_parallel_cnots": 6,
+                    "avg_parallel_cnots": 4.71,
+                    "angle_l1_norm": 6.179001686193218,
+                    "angle_max_magnitude": 3.4153937589999983
+                }
+            }
+        }
+    }
+}

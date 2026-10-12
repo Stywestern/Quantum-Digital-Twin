@@ -6,21 +6,21 @@
                  Fast: this is the backend for parameter training at n ~ 16-24 qubits.
   PennyLaneQAOA  gate-level circuit (RZ / IsingZZ / RX) on any PennyLane device. This is the "real"
                  circuit: use it for gate counts, noise studies (default.mixed), and to cross-validate
-                 the numpy backend (selftest.py checks they agree).
-
-Why two: the cost layer is diagonal, so the numpy backend replaces ~m two-qubit gates per layer by a
-single multiply. Gate-by-gate simulation of a dense problem (hundreds of ZZ terms per layer) becomes the
-bottleneck above ~16-18 qubits. Both implement exactly the same unitary.
+                 the numpy backend.
 
 Parameter vector convention: params = [gamma_1..gamma_p, beta_1..beta_p]  (length 2p).
-Mixer: exp(-i beta X) = RX(2 beta).  Cost: exp(-i gamma h Z) = RZ(2 gamma h), exp(-i gamma J ZZ) = IsingZZ(2 gamma J),
-all with the NORMALISED coefficients h/scale, J/scale (see ising.Landscape).
+Mixer: exp(-i beta X) = RX(2 beta).
+Cost: exp(-i gamma h Z) = RZ(2 gamma h), exp(-i gamma J ZZ) = IsingZZ(2 gamma J),
+all with the NORMALISED coefficients h/scale, J/scale.
 """
 
 from __future__ import annotations
 
+import math
+from collections import Counter
 import numpy as np
 import pennylane as qml
+import networkx as nx
 
 from solvers.simulated_gate_based.s1_ising import IsingProblem, Landscape
 
@@ -29,7 +29,7 @@ class QAOABase:
     def __init__(self, landscape: Landscape, p: int):
         self.land = landscape
         self.p = int(p)
-        self.n_evals = 0                       # number of expectation evaluations (= circuit runs in training)
+        self.n_evals = 0
 
     def _split(self, params):
         params = np.asarray(params, dtype=float)
@@ -54,7 +54,7 @@ def _rx_all(psi: np.ndarray, n: int, beta: float) -> None:
     c = np.cos(beta)
     s = -1j * np.sin(beta)
     for q in range(n):
-        v = psi.reshape(1 << q, 2, 1 << (n - q - 1))     # view; wire 0 = most significant bit
+        v = psi.reshape(1 << q, 2, 1 << (n - q - 1))
         a = v[:, 0, :].copy()
         v[:, 0, :] *= c
         v[:, 0, :] += s * v[:, 1, :]
@@ -84,18 +84,6 @@ class NumpyQAOA(QAOABase):
 # PennyLane gate-level backend
 # ----------------------------------------------------------------------------------------------
 class PennyLaneQAOA(QAOABase):
-    """
-    device       : "default.qubit" (exact, noiseless), "lightning.qubit" (faster, if installed),
-                   "default.mixed" (density matrix, needed for noise; keep n <~ 10-12).
-    cost_layer   : "gates"    -> RZ / IsingZZ gates (default; what hardware would run).
-                   "diagonal" -> one qml.DiagonalQubitUnitary built from the energy table. Convenient, but I have
-                                 NOT verified how efficiently your PennyLane version applies it at larger n --
-                                 benchmark on a small n before relying on it.
-    noise        : None or {"p1": float, "p2": float}: CRUDE gate-level depolarising noise after every
-                   single-qubit (RX/RZ) and two-qubit (ZZ) rotation, on every qubit it touches. Requires
-                   device="default.mixed". One ZZ rotation is ~2 CNOTs on hardware, so p2 ~ 2 * CNOT error.
-    """
-
     def __init__(self, landscape: Landscape, p: int, device: str = "default.mixed",
                  device_kwargs: dict | None = None, cost_layer: str = "gates",
                  hardware_preset: str = "ibm_eagle"):
@@ -108,27 +96,22 @@ class PennyLaneQAOA(QAOABase):
 
         self.qml = qml
         self.cost_layer = cost_layer
-        
-        # Calculate routing overhead (SWAPs) for hardware preset
+
+        # Calculate routing overhead and hardware metrics
         self.hardware_metrics = resource_estimate(landscape.prob, p, target_hardware=hardware_preset)
-        
-        # ---------------------------------------------------------
-        # NOISE MODEL (IBM Eagle 2023-2024 specifications)
-        # ---------------------------------------------------------
+
+        # IBM Eagle specifications (2023-2024 median calibrations)
         base_p1_error = 0.0003    # 0.03% single-qubit rotation error
-        base_p2_error = 0.01      # 1.0% two-qubit (CNOT) error
-        base_readout_err = 0.015  # 1.5% measurement error (Bit flip on readout)
-        
-        # Scale CNOT error by the SWAP overhead required to route the specific grid
+        base_p2_error = 0.01      # 1.0% base CNOT error
+        base_readout_err = 0.015  # 1.5% measurement readout bit-flip
+
         routing_multiplier = self.hardware_metrics["routing_overhead_multiplier"]
-        
+
         self.noise = {
             "p1": min(0.99, base_p1_error),
             "p2": min(0.99, base_p2_error * routing_multiplier),
             "readout": min(0.99, base_readout_err)
         }
-        
-        # ---------------------------------------------------------
 
         prob: IsingProblem = landscape.prob
         n = prob.n
@@ -141,19 +124,18 @@ class PennyLaneQAOA(QAOABase):
             # 1. Initial Superposition
             for q in range(n):
                 qml.Hadamard(wires=q)
-                
+
             # 2. QAOA p-Layers
             for l in range(self.p):
                 self._apply_cost(gammas[l])
                 for q in range(n):
                     qml.RX(2.0 * betas[l], wires=q)
-                    # Apply single-qubit Depolarizing noise
                     qml.DepolarizingChannel(self.noise["p1"], wires=q)
-            
+
             # 3. Measurement / Readout Error Layer
             for q in range(n):
                 qml.BitFlip(self.noise["readout"], wires=q)
-                
+
             return qml.probs(wires=list(range(n)))
 
         self._qnode = qml.QNode(circuit, self.dev)
@@ -161,18 +143,17 @@ class PennyLaneQAOA(QAOABase):
     def _apply_cost(self, gamma):
         p1 = self.noise["p1"]
         p2 = self.noise["p2"]
-        
-        # Magnetic Field (Linear Terms)
+
+        # Linear Terms (Magnetic Field)
         for i, hi in enumerate(self._h):
             if hi != 0.0:
                 self.qml.RZ(2.0 * gamma * hi, wires=i)
                 self.qml.DepolarizingChannel(p1, wires=i)
-                
-        # Grid Connections (Quadratic Terms)
+
+        # Quadratic Terms (Interactions)
         for a, b, jab in zip(self._rows, self._cols, self._J):
             a, b = int(a), int(b)
             self.qml.IsingZZ(2.0 * gamma * jab, wires=[a, b])
-            # Apply Two-Qubit Depolarizing noise scaled by SWAP overhead
             self.qml.DepolarizingChannel(p2, wires=a)
             self.qml.DepolarizingChannel(p2, wires=b)
 
@@ -191,47 +172,104 @@ def make_circuit(landscape: Landscape, p: int, backend: str = "numpy", **kwargs)
 
 
 # ----------------------------------------------------------------------------------------------
-# resource accounting (for the gate-based vs annealing scaling comparison)
+# resource accounting (hardware-aware gate counts, depth, timing, and ESP)
 # ----------------------------------------------------------------------------------------------
-def resource_estimate(prob: IsingProblem, p: int, target_hardware: str = "ibm_heavy_hex") -> dict:
-    """Hardware-aware gate counts and depth of the QAOA circuit."""
-    import networkx as nx
-    import math
-    
+def resource_estimate(prob: IsingProblem, p: int, target_hardware: str = "ibm_eagle") -> dict:
+    """Hardware-aware gate counts, depth, execution latency, and success probability."""
     n, m = prob.n, int(prob.J.size)
     n_h = int(np.count_nonzero(prob.h))
-    
-    # Base logical counts (all-to-all assumption)
-    logical_cnot = 2 * m * p
-    
-    if target_hardware in ["ibm_heavy_hex", "ibm_eagle"]:
-        # Heavy-Hex routing heuristic: 
-        # A dense graph of size N routed on a planar lattice requires O(N) SWAP layers.
-        # Each SWAP is 3 physical CNOTs.
-        swap_overhead_factor = max(1.0, math.sqrt(n)) 
-        physical_cnot = int(logical_cnot * swap_overhead_factor * 3)
-        routing_depth = int(math.sqrt(n) * 3)
-    else:
-        # Ideal all-to-all (no SWAPs)
-        physical_cnot = logical_cnot
-        routing_depth = 1
 
+    # Base logical gate counts
+    logical_cnot = 2 * m * p
+    logical_1q = n + (n_h * p) + (n * p)  # Hadamards + RZ(h) + RX(beta)
+
+    # Topological graph coloring & concurrency (Metric 4)
     colours = 0
+    max_concurrent_cnot = 0
+    avg_concurrent_cnot = 0.0
+
     if m:
         g = nx.Graph()
         g.add_nodes_from(range(n))
         g.add_edges_from(zip(prob.rows.tolist(), prob.cols.tolist()))
-        colours = 1 + max(nx.greedy_color(nx.line_graph(g), strategy="largest_first").values())
-    
-    per_layer_depth = (1 if n_h else 0) + (3 * colours * routing_depth) + 1 
-    
+        coloring = nx.greedy_color(nx.line_graph(g), strategy="largest_first")
+        if coloring:
+            colours = 1 + max(coloring.values())
+            color_counts = Counter(coloring.values())
+            max_concurrent_cnot = max(color_counts.values())
+            avg_concurrent_cnot = round(m / colours, 2)
+
+    if target_hardware in ["ibm_heavy_hex", "ibm_eagle"]:
+        # Heavy-Hex routing: diameter scales as O(sqrt(n)).
+        # Each SWAP adds 3 CNOTs and ~2 single-qubit correction gates.
+        swap_distance = max(1.0, math.sqrt(n))
+        physical_cnot = int(logical_cnot * swap_distance * 3)
+        extra_swap_1q = int(logical_cnot * swap_distance * 2)
+        physical_1q = logical_1q + extra_swap_1q
+        routing_depth = int(math.sqrt(n) * 3)
+
+        # Calibrated IBM Eagle hardware gate durations (ns)
+        t_1q_ns = 35.0
+        t_2q_ns = 300.0
+        t_ro_ns = 750.0
+        coherence_limit_ns = 100_000.0  # 100 µs nominal T2 limit
+
+        # Base physical noise rates
+        p1 = 0.0003
+        p2_base = 0.01
+        p_ro = 0.015
+    else:
+        # Ideal all-to-all logical baseline
+        physical_cnot = logical_cnot
+        physical_1q = logical_1q
+        routing_depth = 1
+        t_1q_ns = 0.0
+        t_2q_ns = 0.0
+        t_ro_ns = 0.0
+        coherence_limit_ns = float("inf")
+        p1, p2_base, p_ro = 0.0, 0.0, 0.0
+
+    # Depth Breakdown
+    depth_1q = 1 + (p if n_h else 0) + p
+    depth_2q = p * (colours * routing_depth)
+    depth_estimate = depth_1q + depth_2q
+
+    # Metric 2: Duration & Coherence Saturation
+    execution_duration_ns = (depth_1q * t_1q_ns) + (depth_2q * t_2q_ns) + t_ro_ns
+    coherence_saturation_pct = (
+        round((execution_duration_ns / coherence_limit_ns) * 100.0, 2)
+        if coherence_limit_ns != float("inf") else 0.0
+    )
+
+    # Metric 1: Estimated Success Probability (ESP)
+    esp = ((1.0 - p2_base) ** physical_cnot) * ((1.0 - p1) ** physical_1q) * ((1.0 - p_ro) ** n)
+
+    routing_mult = round(physical_cnot / max(1, logical_cnot), 2)
+
     return {
-        "qubits": n, "p": p, "logical_zz_terms": m,
+        "qubits": n,
+        "p": p,
+        "logical_zz_terms": m,
+        "logical_single_qubit_gates": logical_1q,
         "logical_two_qubit_gates": logical_cnot,
+        "physical_single_qubit_gates": physical_1q,
         "physical_two_qubit_gates": physical_cnot,
-        "routing_overhead_multiplier": physical_cnot / max(1, logical_cnot),
-        "depth_estimate": 1 + p * per_layer_depth,
-        "target_hardware": target_hardware
+        "routing_overhead_multiplier": routing_mult,
+        "circuit_depth": depth_estimate,
+        "depth_estimate": depth_estimate,
+        "target_hardware": target_hardware,
+        "concurrency": {
+            "max_parallel_cnots": max_concurrent_cnot,
+            "avg_parallel_cnots": avg_concurrent_cnot,
+            "color_layers": colours
+        },
+        "timing": {
+            "execution_duration_ns": round(execution_duration_ns, 1),
+            "coherence_saturation_pct": coherence_saturation_pct
+        },
+        "fidelity": {
+            "estimated_success_probability": float(esp)
+        }
     }
 
 if __name__ == "__main__":

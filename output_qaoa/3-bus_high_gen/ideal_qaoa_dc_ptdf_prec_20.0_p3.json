@@ -1,0 +1,218 @@
+{
+    "problem_parameters": {
+        "network_name": "3-Bus High Gen",
+        "topology": {
+            "buses": 3,
+            "branches": 3,
+            "lines": 3,
+            "trafos": 0,
+            "is_connected": true
+        },
+        "dispatchable_assets": {
+            "total_count": 3,
+            "generators": 2,
+            "external_grids": 1,
+            "capacity_max_mw": 260.0,
+            "capacity_min_mw": 0.0
+        },
+        "demand": {
+            "load_count": 2,
+            "total_load_mw": 150.0,
+            "static_gen_mw": 0.0,
+            "net_active_demand_mw": 150.0
+        },
+        "feasibility_precheck": {
+            "capacity_sufficient": true
+        },
+        "linear_costs_eur_per_mw": {
+            "ext_grid_0": 40.0,
+            "gen_0": 25.0,
+            "gen_1": 15.0
+        }
+    },
+    "opf_results": {
+        "solution": {
+            "cost_eur_per_hr": 3100.0,
+            "generator_dispatch_mw": {
+                "0": {
+                    "p_mw": 60.0
+                },
+                "1": {
+                    "p_mw": 80.0
+                }
+            },
+            "static_generator_dispatch_mw": {},
+            "slack_dispatch_mw": {
+                "0": {
+                    "p_mw": 10.0
+                }
+            },
+            "grid_state": {
+                "max_line_loading_percent": 16.735,
+                "max_voltage_pu": 1.0,
+                "min_voltage_pu": 1.0,
+                "feasibility": {
+                    "total_generation_mw": 150.0,
+                    "total_load_mw": 150.0,
+                    "raw_imbalance_mw": -10.0,
+                    "raw_slack_dispatch_mw": 0.0,
+                    "cost_raw_dispatch_eur": 2700.0,
+                    "max_line_violation_mw": 0.0,
+                    "tolerance_mw": 20.0,
+                    "balance_ok": true,
+                    "lines_ok": true,
+                    "bounds_ok": true,
+                    "is_feasible": true,
+                    "line_flows_mw": {
+                        "line_0": 0.0,
+                        "line_1": 10.0,
+                        "line_2": 10.0
+                    },
+                    "bus_angles_rad": {
+                        "0": 0.0,
+                        "1": 0.0,
+                        "2": -0.00189
+                    }
+                }
+            }
+        },
+        "metadata": {
+            "status": "Success",
+            "solver_name": "ideal_qaoa_dc_ptdf",
+            "execution_time_seconds": {
+                "total": 29.1808,
+                "formulation_cpu": 0.0031,
+                "parameter_optimisation": 29.1255,
+                "sampling_and_decoding": 0.0482
+            },
+            "problem_complexity": {
+                "formulation": "dc_ptdf",
+                "encoding": "radix",
+                "classical_domain_input": {
+                    "continuous_variables": 3,
+                    "equality_constraints": 1,
+                    "inequality_constraints": 6
+                },
+                "quantum_domain_qubo": {
+                    "total_logical_qubits": 12,
+                    "qubits_used_for_variables": 9,
+                    "qubits_used_for_dispatch": 9,
+                    "qubits_used_for_angles": 0,
+                    "qubits_wasted_on_slack": 3,
+                    "num_interactions": 57,
+                    "density_percent": 86.36,
+                    "offset": 49541.4199079757
+                },
+                "hardware_limits": {
+                    "ising_max": 2310.0,
+                    "ising_min": 124.066407,
+                    "ising_dynamic_range": 18.62,
+                    "ising_at_risk_percent": 0.0,
+                    "max_coefficient_magnitude": 21631.8672,
+                    "min_coefficient_magnitude": 550.0,
+                    "dac_precision_warning": false
+                },
+                "penalties": {
+                    "balance": 2.2,
+                    "line": {
+                        "line_0": 2.2,
+                        "line_1": 1.3750000000000002,
+                        "line_2": 1.3750000000000002
+                    }
+                }
+            },
+            "qubo_parameters": {
+                "mw_precision": 20.0,
+                "penalty_balance": null,
+                "penalty_line": null,
+                "seed": 0
+            },
+            "algorithmic_metrics": {
+                "framework": "gate_based_qaoa",
+                "num_iterations": 1,
+                "qaoa": {
+                    "depths": [
+                        1,
+                        2,
+                        3
+                    ],
+                    "per_depth": [
+                        {
+                            "p": 1,
+                            "approx_ratio": 0.94238461546497,
+                            "p_ground": 0.0015523555207876084,
+                            "n_evals": 1690,
+                            "converged": true
+                        },
+                        {
+                            "p": 2,
+                            "approx_ratio": 0.9567619136183821,
+                            "p_ground": 0.0027647568804088857,
+                            "n_evals": 8890,
+                            "converged": true
+                        },
+                        {
+                            "p": 3,
+                            "approx_ratio": 0.9632180604800659,
+                            "p_ground": 0.0039851149192029044,
+                            "n_evals": 16557,
+                            "converged": true
+                        }
+                    ],
+                    "trained_optimal_angles": [
+                        0.5624356438617486,
+                        1.6715432442357587,
+                        2.862758334870379,
+                        -0.32425415076866215,
+                        -0.13584361436561743,
+                        -0.08068430679714647
+                    ],
+                    "trained_depth": 3,
+                    "approx_ratio": 0.9632180604800659,
+                    "approx_ratio_random_baseline": 0.8634054697033062,
+                    "p_ground_exact": 0.0039851149192029044,
+                    "p_ground_sampled": 0.006,
+                    "feasible_fraction": 0.7635,
+                    "feasible_found": true,
+                    "energy_scale": 7600.142079321298,
+                    "total_circuit_evals": 27137,
+                    "optimizer": "Powell",
+                    "backend": "numpy_statevector"
+                }
+            },
+            "hardware_metrics": {
+                "qpu_target": "ideal_statevector",
+                "logical_qubits": 12,
+                "physical_qubits": 12,
+                "circuit_depth": 43,
+                "two_qubit_gates": 342,
+                "routing_overhead_multiplier": 1.0,
+                "resources": {
+                    "qubits": 12,
+                    "p": 3,
+                    "logical_zz_terms": 57,
+                    "logical_single_qubit_gates": 84,
+                    "logical_two_qubit_gates": 342,
+                    "physical_single_qubit_gates": 84,
+                    "physical_two_qubit_gates": 342,
+                    "routing_overhead_multiplier": 1.0,
+                    "circuit_depth": 43,
+                    "depth_estimate": 43,
+                    "target_hardware": "ideal",
+                    "concurrency": {
+                        "max_parallel_cnots": 6,
+                        "avg_parallel_cnots": 4.75,
+                        "color_layers": 12
+                    },
+                    "timing": {
+                        "execution_duration_ns": 0.0,
+                        "coherence_saturation_pct": 0.0
+                    },
+                    "fidelity": {
+                        "estimated_success_probability": 1.0
+                    }
+                }
+            }
+        }
+    }
+}

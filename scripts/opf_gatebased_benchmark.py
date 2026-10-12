@@ -82,7 +82,7 @@ def print_execution_summary(payloads: dict, config: dict = None):
             routing = hw.get("routing_overhead_multiplier", "N/A")
             
             p_ground = alg.get("ideal_p_ground", alg.get("p_ground_exact", "N/A"))
-            feas_frac = alg.get("feasible_fraction", "N/A")
+            feas_frac = alg.get("feasible_fraction", alg.get("raw_readout", {}).get("feasible_fraction", "N/A"))
             
             # Post-processing mitigation stats
             mit = alg.get("mitigated_readout", {})
@@ -222,18 +222,18 @@ def run_pipeline(formulator_config, pristine_net, p_sweep, shots=2000, n_restart
 #                                              Execution Block
 ###############################################################################################################
 if __name__ == "__main__":
-    from homemade_grids.small_grids import case3_low_gen
+    from homemade_grids.small_grids import case3_low_gen, case3_high_gen, case4_low_gen, case4_high_gen, extract_network_info
     
     default_config = {
         "formulation": "dc_ptdf",
         "encoding": "radix",
-        "mw_precision": 50.0, 
+        "mw_precision": 20.0, 
     }
 
     # QAOA Specific Hyperparameters
     p_sweep = (1, 2, 3)  
     n_restarts = 15      
-    shots = 2000         
+    shots = 1000         
 
     run_pipeline(
         default_config, 

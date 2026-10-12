@@ -1,0 +1,224 @@
+{
+    "problem_parameters": {
+        "network_name": "3-Bus High Gen",
+        "topology": {
+            "buses": 3,
+            "branches": 3,
+            "lines": 3,
+            "trafos": 0,
+            "is_connected": true
+        },
+        "dispatchable_assets": {
+            "total_count": 3,
+            "generators": 2,
+            "external_grids": 1,
+            "capacity_max_mw": 260.0,
+            "capacity_min_mw": 0.0
+        },
+        "demand": {
+            "load_count": 2,
+            "total_load_mw": 150.0,
+            "static_gen_mw": 0.0,
+            "net_active_demand_mw": 150.0
+        },
+        "feasibility_precheck": {
+            "capacity_sufficient": true
+        },
+        "linear_costs_eur_per_mw": {
+            "ext_grid_0": 40.0,
+            "gen_0": 25.0,
+            "gen_1": 15.0
+        }
+    },
+    "opf_results": {
+        "solution": {
+            "cost_eur_per_hr": 4000.0,
+            "generator_dispatch_mw": {
+                "0": {
+                    "p_mw": 50.0
+                },
+                "1": {
+                    "p_mw": 50.0
+                }
+            },
+            "static_generator_dispatch_mw": {},
+            "slack_dispatch_mw": {
+                "0": {
+                    "p_mw": 50.0
+                }
+            },
+            "grid_state": {
+                "max_line_loading_percent": 41.837,
+                "max_voltage_pu": 1.0,
+                "min_voltage_pu": 1.0,
+                "feasibility": {
+                    "total_generation_mw": 150.0,
+                    "total_load_mw": 150.0,
+                    "raw_imbalance_mw": 0.0,
+                    "raw_slack_dispatch_mw": 50.0,
+                    "cost_raw_dispatch_eur": 4000.0,
+                    "max_line_violation_mw": 0.0,
+                    "tolerance_mw": 50.0,
+                    "balance_ok": true,
+                    "lines_ok": true,
+                    "bounds_ok": true,
+                    "is_feasible": true,
+                    "line_flows_mw": {
+                        "line_0": 16.667,
+                        "line_1": 16.667,
+                        "line_2": 33.333
+                    },
+                    "bus_angles_rad": {
+                        "0": 0.0,
+                        "1": -0.003151,
+                        "2": -0.006301
+                    }
+                }
+            }
+        },
+        "metadata": {
+            "status": "Success",
+            "solver_name": "emu_qaoa_ibm_eagle_dc_ptdf",
+            "execution_time_seconds": {
+                "total": 3.7254,
+                "formulation_cpu": 0.002,
+                "parameter_optimisation": 3.6281,
+                "sampling_and_decoding": 0.0884
+            },
+            "problem_complexity": {
+                "formulation": "dc_ptdf",
+                "encoding": "radix",
+                "classical_domain_input": {
+                    "continuous_variables": 3,
+                    "equality_constraints": 1,
+                    "inequality_constraints": 6
+                },
+                "quantum_domain_qubo": {
+                    "total_logical_qubits": 6,
+                    "qubits_used_for_variables": 4,
+                    "qubits_used_for_dispatch": 4,
+                    "qubits_used_for_angles": 0,
+                    "qubits_wasted_on_slack": 2,
+                    "num_interactions": 11,
+                    "density_percent": 73.33,
+                    "offset": 19816.567963190275
+                },
+                "hardware_limits": {
+                    "ising_max": 2319.6836,
+                    "ising_min": 343.75,
+                    "ising_dynamic_range": 6.75,
+                    "ising_at_risk_percent": 0.0,
+                    "max_coefficient_magnitude": 9557.1836,
+                    "min_coefficient_magnitude": 1375.0,
+                    "dac_precision_warning": false
+                },
+                "penalties": {
+                    "balance": 0.88,
+                    "line": {
+                        "line_0": 0.88,
+                        "line_1": 0.55,
+                        "line_2": 0.55
+                    }
+                }
+            },
+            "qubo_parameters": {
+                "mw_precision": 50.0,
+                "penalty_balance": null,
+                "penalty_line": null,
+                "seed": 0
+            },
+            "algorithmic_metrics": {
+                "framework": "gate_based_qaoa",
+                "num_iterations": 1,
+                "qaoa": {
+                    "depths": [
+                        1,
+                        2,
+                        3
+                    ],
+                    "angles_source": "retrained_noise_unaware",
+                    "trained_optimal_angles": [
+                        0.5047284373620421,
+                        1.255498366429381,
+                        2.2550815223039287,
+                        -0.45113830539733984,
+                        -0.25312522341274896,
+                        -0.1568355343141118
+                    ],
+                    "ideal_approx_ratio": 0.9675894794241386,
+                    "ideal_p_ground": 0.37345146232246534,
+                    "raw_readout": {
+                        "p_ground_sampled": 0.094,
+                        "lowest_energy_sampled": 4209.384370552223,
+                        "unique_states_measured": 64,
+                        "feasible_fraction": 0.7135
+                    },
+                    "mitigated_readout": {
+                        "p_ground_sampled": 0.659,
+                        "lowest_energy_sampled": 4209.384370552223,
+                        "unique_states_collapsed": 7,
+                        "total_hardware_errors_fixed": 2511,
+                        "feasible_fraction": 1.0,
+                        "feasible_found": true
+                    },
+                    "noise_model": {
+                        "p1": 0.0003,
+                        "p2": 0.0733,
+                        "readout": 0.015
+                    },
+                    "energy_scale": 4675.467489322969,
+                    "optimizer": "Powell",
+                    "backend": "pennylane_noisy_ibm_eagle"
+                }
+            },
+            "hardware_metrics": {
+                "qpu_target": "noisy_ibm_eagle_heavy_hex",
+                "logical_qubits": 6,
+                "physical_qubits": 6,
+                "circuit_depth": 112,
+                "logical_two_qubit_gates": 66,
+                "physical_two_qubit_gates": 484,
+                "routing_overhead_multiplier": 7.33,
+                "noise_profile": {
+                    "p1": 0.0003,
+                    "p2": 0.0733,
+                    "readout": 0.015
+                },
+                "resources": {
+                    "qubits": 6,
+                    "p": 3,
+                    "logical_zz_terms": 11,
+                    "logical_single_qubit_gates": 42,
+                    "logical_two_qubit_gates": 66,
+                    "physical_single_qubit_gates": 365,
+                    "physical_two_qubit_gates": 484,
+                    "routing_overhead_multiplier": 7.33,
+                    "circuit_depth": 112,
+                    "depth_estimate": 112,
+                    "target_hardware": "ibm_eagle",
+                    "concurrency": {
+                        "max_parallel_cnots": 3,
+                        "avg_parallel_cnots": 2.2,
+                        "color_layers": 5
+                    },
+                    "timing": {
+                        "execution_duration_ns": 32495.0,
+                        "coherence_saturation_pct": 32.5
+                    },
+                    "fidelity": {
+                        "estimated_success_probability": 0.006316684529474162
+                    }
+                },
+                "advanced_metrics": {
+                    "estimated_success_probability": 0.006316684529474162,
+                    "execution_duration_ns": 32495.0,
+                    "coherence_saturation_percent": 32.5,
+                    "max_parallel_cnots": 3,
+                    "avg_parallel_cnots": 2.2,
+                    "angle_l1_norm": 4.876407389219552,
+                    "angle_max_magnitude": 2.2550815223039287
+                }
+            }
+        }
+    }
+}
