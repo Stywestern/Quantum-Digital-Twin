@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import time
 import numpy as np
+from tqdm.auto import tqdm  # Added for progress tracking
 
 from solvers.qubo_formulator import QuboFormulator
 from solvers.simulated_gate_based.s2_circuits import make_circuit, resource_estimate
@@ -92,11 +93,7 @@ class _BaseQAOASolver(QuboFormulator):
 
 
 class IdealQAOA(_BaseQAOASolver):
-    """Ideal statevector QAOA solver using the high-speed NumPy backend.
-
-    Serves as the theoretical mathematical baseline with infinite coherence
-    and all-to-all logical connectivity.
-    """
+    """Ideal statevector QAOA solver using the high-speed NumPy backend."""
 
     def __init__(self, formulation="dc_ptdf", mw_precision=20.0, p=2, p_sweep=None,
                  shots=2000, method="COBYLA", maxiter=200, n_restarts=1, dt=0.75,
@@ -112,6 +109,8 @@ class IdealQAOA(_BaseQAOASolver):
         status, cost, dispatch, sgen_dispatch, slack_dispatch = "Success", None, {}, {}, {}
         feasibility, complexity, qaoa_meta, resources, n_qubits = None, {}, {}, {}, 0
         form_t = opt_t = samp_t = 0.0
+        
+        tqdm.write("  -> [IdealQAOA] Starting Formulation...")
 
         try:
             # 1. Formulation & Landscape
@@ -125,6 +124,7 @@ class IdealQAOA(_BaseQAOASolver):
 
             # 2. Angle Training on Ideal Statevector
             t1 = time.time()
+            tqdm.write(f"  -> [IdealQAOA] Training parameters (p={self.p}) via fast NumPy backend...")
             p_values = self.p_sweep or (self.p,)
             sweep = depth_sweep(land, p_values, backend="numpy", method=self.method,
                                 maxiter=self.maxiter, n_restarts=self.n_restarts,
@@ -134,6 +134,7 @@ class IdealQAOA(_BaseQAOASolver):
 
             # 3. Sampling from Ideal Distribution
             t2 = time.time()
+            tqdm.write("  -> [IdealQAOA] Sampling and decoding optimal states...")
             stats = evaluate_samples(circ, self, net, res.params, shots=self.shots,
                                      seed=self.seed, max_decode=self.max_decode)
             samp_t = time.time() - t2
@@ -152,8 +153,7 @@ class IdealQAOA(_BaseQAOASolver):
                 "depths": [r.p for r, _ in sweep],
                 "per_depth": [{"p": r.p, "approx_ratio": r.approx_ratio, "p_ground": r.p_ground,
                                "n_evals": r.n_evals, "converged": r.success} for r, _ in sweep],
-                # --- angle persistence: EmuQAOA (or any later run) can transfer these ---
-                "trained_optimal_angles": res.params.tolist(),   # [gammas..., betas...], length 2*trained_depth
+                "trained_optimal_angles": res.params.tolist(),
                 "trained_depth": res.p,
                 "approx_ratio": res.approx_ratio,
                 "approx_ratio_random_baseline": res.approx_ratio_random,
@@ -161,14 +161,14 @@ class IdealQAOA(_BaseQAOASolver):
                 "p_ground_sampled": stats["p_ground_sampled"],
                 "feasible_fraction": stats["feasible_fraction"],
                 "feasible_found": stats["feasible_found"],
-                "energy_scale": land.scale,          # angles are only valid for THIS normalised QUBO
+                "energy_scale": land.scale,
                 "total_circuit_evals": int(sum(r.n_evals for r, _ in sweep)),
                 "optimizer": self.method,
                 "backend": "numpy_statevector",
             }
         except Exception as e:
             status = f"Failed: {e}"
-            print(f"\n[IdealQAOA Error]: {e}\n")
+            tqdm.write(f"\n[IdealQAOA Error]: {e}\n")
 
         hardware_metrics = {
             "qpu_target": "ideal_statevector",
@@ -188,26 +188,11 @@ class IdealQAOA(_BaseQAOASolver):
 
 
 class EmuQAOA(_BaseQAOASolver):
-    """Hardware-aware QAOA emulator modeling physical gate-based chips.
-
-    Workflow:
-      1. Angles: transferred from a previous ideal run (fixed_params), or trained with the fast
-         NumPy simulator if fixed_params is None.
-      2. Transfers parameters into a PennyLane density matrix (`default.mixed`).
-      3. Applies heavy-hex routing SWAP inflation, two-qubit depolarizing noise,
-         and readout bit-flip channels.
-      4. Extracted shots undergo Steepest Descent error mitigation to fix readout/CNOT flips.
-
-    fixed_params       : flat [gammas..., betas...] vector, e.g. IdealQAOA's "trained_optimal_angles".
-                         Noise-UNAWARE angles (optimal for the ideal circuit, not for the noisy one).
-    fixed_energy_scale : IdealQAOA's "energy_scale". If given, it is compared with this instance's
-                         scale as a guard against transferring angles trained on a different QUBO
-                         (different grid, precision, penalties or encoding).
-    """
+    """Hardware-aware QAOA emulator modeling physical gate-based chips."""
 
     def __init__(self, formulation="dc_ptdf", mw_precision=20.0, p=2, p_sweep=None,
                  hardware_preset="ibm_eagle", shots=1000, method="COBYLA", maxiter=200,
-                 n_restarts=1, dt=0.75, seed=0, max_qubits=24, max_decode=None,
+                 n_restarts=1, dt=0.75, seed=0, max_qubits=15, max_decode=None,
                  fixed_params=None, fixed_energy_scale=None, **kwargs):
         super().__init__(
             formulation=formulation, mw_precision=mw_precision, p=p, p_sweep=p_sweep,
@@ -219,15 +204,22 @@ class EmuQAOA(_BaseQAOASolver):
         self.fixed_energy_scale = fixed_energy_scale
 
     def solve_opf(self, net):
-        # We need the index sampler and post-processor specifically for Emulation
         from solvers.simulated_gate_based.s5_evaluate import sample_indices
         from solvers.simulated_gate_based.s4_postprocess import postprocess_shots
 
         start = time.time()
         status, cost, dispatch, sgen_dispatch, slack_dispatch = "Success", None, {}, {}, {}
-        feasibility, complexity, qaoa_meta, resources, n_qubits = None, {}, {}, {}, 0
+        feasibility, complexity, qaoa_meta = None, {}, {}
+        
+        # Instantiate fallback variables in case of early abort
+        resources = {}
+        n_qubits, p_used = 0, self.p
+        circ_emu = None
+        params = None
         form_t = opt_t = samp_t = 0.0
         
+        tqdm.write("  -> [EmuQAOA] Starting Formulation...")
+
         try:
             # 1. Formulation & Landscape
             t0 = time.time()
@@ -244,9 +236,10 @@ class EmuQAOA(_BaseQAOASolver):
             prob = IsingProblem.from_bqm(bqm)
             land = Landscape(prob, max_qubits=self.max_qubits)
 
-            # 2. Angles: transfer from the ideal run if provided, otherwise train (numpy backend)
+            # 2. Angles
             t1 = time.time()
             if self.fixed_params is not None:
+                tqdm.write("  -> [EmuQAOA] Applying fixed angles (skipping training)...")
                 params = np.asarray(self.fixed_params, dtype=float)
                 if params.ndim != 1 or params.size == 0 or params.size % 2:
                     raise ValueError("fixed_params must be a flat [gammas..., betas...] vector of even length")
@@ -261,13 +254,14 @@ class EmuQAOA(_BaseQAOASolver):
                         f"energy-scale mismatch (this QUBO {land.scale:.6g} vs angles trained on "
                         f"{self.fixed_energy_scale:.6g}): the angles belong to a different QUBO; "
                         f"re-run the ideal solver for this configuration")
-                # ideal-circuit metrics at the transferred angles (cheap numpy evaluation)
+                
                 circ_ideal = make_circuit(land, p_used, backend="numpy")
                 pr_ideal = circ_ideal.probs(params)
                 ideal_ar = land.approx_ratio(float(pr_ideal @ land.E_norm))
                 ideal_pg = land.p_ground(pr_ideal)
                 depths, angles_source = [p_used], "transferred_from_ideal_run"
             else:
+                tqdm.write(f"  -> [EmuQAOA] Training parameters (p={self.p}) via NumPy backend...")
                 p_values = self.p_sweep or (self.p,)
                 sweep = depth_sweep(land, p_values, backend="numpy", method=self.method,
                                     maxiter=self.maxiter, n_restarts=self.n_restarts,
@@ -287,7 +281,10 @@ class EmuQAOA(_BaseQAOASolver):
             # 4. Sampling & Error Mitigation
             t2 = time.time()
 
-            # 4a. Raw Measurement (Hardware readouts before classical fixes)
+            # The Exponential Bottleneck
+            tqdm.write(f"  -> [EmuQAOA] Executing density matrix simulation for {n_qubits} qubits (Exponentially Heavy, please wait)...")
+            
+            # 4a. Raw Measurement
             uniq_raw, cnt_raw = sample_indices(circ_emu, params, shots=self.shots, seed=self.seed)
 
             raw_energies = land.raw_energy(uniq_raw)
@@ -295,6 +292,7 @@ class EmuQAOA(_BaseQAOASolver):
             best_raw_energy = float(np.min(raw_energies))
 
             # 4b. Steepest Descent Mitigation
+            tqdm.write("  -> [EmuQAOA] Simulating readout & mitigating hardware errors...")
             uniq_fixed, cnt_fixed, total_flips = postprocess_shots(land, uniq_raw, cnt_raw)
 
             # 4c. Decode the Mitigated Shots
@@ -305,7 +303,8 @@ class EmuQAOA(_BaseQAOASolver):
             best_feasible, best_any = None, None
             feas_shots, decoded_shots, n_decoded = 0, 0, 0
 
-            for j in order:
+            # Progress bar for Mitigated decoding
+            for j in tqdm(order, desc="  -> Mitigated Decode", leave=False):
                 sample = land.index_to_sample(int(uniq_fixed[j]))
                 d_p, d_sgen, d_slack, d_cost, d_feas = self._decode_solution(sample, net)
                 n_decoded += 1
@@ -338,12 +337,12 @@ class EmuQAOA(_BaseQAOASolver):
             p_ground_raw = float(cnt_raw[np.isin(uniq_raw, land.ground)].sum() / self.shots)
             p_ground_fixed = float(cnt_fixed[np.isin(uniq_fixed, land.ground)].sum() / self.shots)
 
-            resources = resource_estimate(prob, p_used, target_hardware=self.hardware_preset)
-
-            # 5. Metadata Construction (Tracking Pre/Post Mitigation)
+            # 5. Metadata Construction
             resources = resource_estimate(prob, p_used, target_hardware=self.hardware_preset)
             raw_feas_shots = 0
-            for i, u_idx in enumerate(uniq_raw):
+            
+            # Progress bar for Raw decoding
+            for i, u_idx in enumerate(tqdm(uniq_raw, desc="  -> Raw Decode", leave=False)):
                 sample = land.index_to_sample(int(u_idx))
                 _, _, _, _, d_feas = self._decode_solution(sample, net)
                 if d_feas["is_feasible"]:
@@ -355,8 +354,6 @@ class EmuQAOA(_BaseQAOASolver):
                 "trained_optimal_angles": params.tolist(),
                 "ideal_approx_ratio": ideal_ar,
                 "ideal_p_ground": ideal_pg,
-
-                # Mitigation Tracking Block
                 "raw_readout": {
                     "p_ground_sampled": p_ground_raw,
                     "lowest_energy_sampled": best_raw_energy,
@@ -371,7 +368,6 @@ class EmuQAOA(_BaseQAOASolver):
                     "feasible_fraction": feas_shots / decoded_shots if decoded_shots else 0.0,
                     "feasible_found": best_feasible is not None
                 },
-
                 "noise_model": getattr(circ_emu, "noise", {}),
                 "energy_scale": land.scale,
                 "optimizer": self.method,
@@ -379,7 +375,11 @@ class EmuQAOA(_BaseQAOASolver):
             }
         except Exception as e:
             status = f"Failed: {e}"
-            print(f"\n[EmuQAOA Error]: {e}\n")
+            tqdm.write(f"\n[EmuQAOA Error]: {e}\n")
+
+        # Safely handle missing resources if the solver aborted early
+        if not resources:
+            resources = {"qubits": n_qubits}
 
         hardware_metrics = {
             "qpu_target": f"noisy_{self.hardware_preset}_heavy_hex",
