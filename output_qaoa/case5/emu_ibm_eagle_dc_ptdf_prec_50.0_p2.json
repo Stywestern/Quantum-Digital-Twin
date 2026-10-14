@@ -49,9 +49,9 @@
             "status": "Failed: Unable to allocate 1.00 TiB for an array with shape (2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2) and data type complex128",
             "solver_name": "emu_qaoa_ibm_eagle_dc_ptdf",
             "execution_time_seconds": {
-                "total": 178.1712,
-                "formulation_cpu": 0.0031,
-                "parameter_optimisation": 177.4916,
+                "total": 91.1832,
+                "formulation_cpu": 0.0029,
+                "parameter_optimisation": 90.2657,
                 "sampling_and_decoding": 0.0
             },
             "problem_complexity": {
@@ -117,15 +117,17 @@
                     "p2": 0.1273,
                     "readout": 0.015
                 },
-                "resources": {},
+                "resources": {
+                    "qubits": 18
+                },
                 "advanced_metrics": {
                     "estimated_success_probability": null,
                     "execution_duration_ns": null,
                     "coherence_saturation_percent": null,
                     "max_parallel_cnots": null,
                     "avg_parallel_cnots": null,
-                    "angle_l1_norm": 3.44543413168942,
-                    "angle_max_magnitude": 2.1768325702102973
+                    "angle_l1_norm": 3.4295799067737858,
+                    "angle_max_magnitude": 2.163274841173174
                 }
             }
         }

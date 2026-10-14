@@ -21,20 +21,14 @@ if __name__ == "__main__":
     # 1. Define the Grids
     grid_generators = [
         # --- Micro / Fundamental Verification (Safe for QAOA Emulation) ---
-        case3_low_gen,
-        case4_low_gen,
-        case3_high_gen,
-        case4_high_gen,
-        pn.case5,          # 5 buses
-        
-        # --- WARNING: The following grids will likely cause OOM errors ---
-        # Statevector tracking is 2^N. Density matrix emulation is 4^N.
-        # Unless mw_precision is set extremely high to minimize logical qubits, 
-        # these will exceed the 12-qubit emulator limit.
-        
+        #case3_low_gen,
+        #case4_low_gen,
+        #case3_high_gen,
+        #case4_high_gen,
         pn.case6ww,        # 6-bus standard case
-        pn.case9,          # 9 buses
         pn.case14,         # 14 buses
+        pn.case9,          # 9 buses
+        pn.case5,          # 5 buses
     ]
     
     # 2. Define the parameter space
@@ -50,7 +44,7 @@ if __name__ == "__main__":
             return {"p_sweep": (1, 2, 3), "shots": 2000, "n_restarts": 15, "method": "Powell"}
         else:
             # Pushing the limit: Keep p-depth and restarts low to prevent execution time from exploding
-            return {"p_sweep": (1, 2), "shots": 1000, "n_restarts": 5, "method": "Powell"}
+            return {"p_sweep": (1, 2), "shots": 1000, "n_restarts": 1, "method": "COBYLA"}
     
     total_runs = len(grid_generators) * len(formulations) * len(encodings) * len(precisions)
 
@@ -94,6 +88,7 @@ if __name__ == "__main__":
                     "mw_precision": prec,
                     "penalty_safety": 1.1,
                     "ptdf_threshold": 0.05,
+                    "max_qubits": 20,
                 }
                 
                 try:

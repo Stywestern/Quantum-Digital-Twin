@@ -1,0 +1,132 @@
+{
+    "problem_parameters": {
+        "network_name": "case14",
+        "topology": {
+            "buses": 14,
+            "branches": 20,
+            "lines": 15,
+            "trafos": 5,
+            "is_connected": true
+        },
+        "dispatchable_assets": {
+            "total_count": 5,
+            "generators": 4,
+            "external_grids": 1,
+            "capacity_max_mw": 772.4000000000001,
+            "capacity_min_mw": 0.0
+        },
+        "demand": {
+            "load_count": 11,
+            "total_load_mw": 259.0,
+            "static_gen_mw": 0.0,
+            "net_active_demand_mw": 259.0
+        },
+        "feasibility_precheck": {
+            "capacity_sufficient": true
+        },
+        "linear_costs_eur_per_mw": {
+            "ext_grid_0": 20.0,
+            "gen_0": 20.0,
+            "gen_1": 40.0,
+            "gen_2": 40.0,
+            "gen_3": 40.0
+        }
+    },
+    "opf_results": {
+        "solution": {
+            "cost_eur_per_hr": null,
+            "generator_dispatch_mw": {},
+            "static_generator_dispatch_mw": {},
+            "slack_dispatch_mw": {},
+            "grid_state": {
+                "max_line_loading_percent": null,
+                "max_voltage_pu": 1.0,
+                "min_voltage_pu": 1.0,
+                "feasibility": null
+            }
+        },
+        "metadata": {
+            "status": "Failed: 22 qubits exceeds max_qubits=20 (needs ~0.2 GB and a 2^22 energy table). Reduce the QUBO: coarser mw_precision, larger slack_precision_factor, fewer assets/lines, or raise max_qubits knowingly.",
+            "solver_name": "ideal_qaoa_dc_ptdf",
+            "execution_time_seconds": {
+                "total": 0.0043,
+                "formulation_cpu": 0.0037,
+                "parameter_optimisation": 0.0,
+                "sampling_and_decoding": 0.0
+            },
+            "problem_complexity": {
+                "formulation": "dc_ptdf",
+                "encoding": "radix",
+                "classical_domain_input": {
+                    "continuous_variables": 5,
+                    "equality_constraints": 1,
+                    "inequality_constraints": 10
+                },
+                "quantum_domain_qubo": {
+                    "total_logical_qubits": 22,
+                    "qubits_used_for_variables": 22,
+                    "qubits_used_for_dispatch": 22,
+                    "qubits_used_for_angles": 0,
+                    "qubits_wasted_on_slack": 0,
+                    "num_interactions": 231,
+                    "density_percent": 100.0,
+                    "offset": 664101.8999999999
+                },
+                "hardware_limits": {
+                    "ising_max": 202319.9735,
+                    "ising_min": 495.0,
+                    "ising_dynamic_range": 408.73,
+                    "ising_at_risk_percent": 67.59,
+                    "max_coefficient_magnitude": 562770.4499,
+                    "min_coefficient_magnitude": 1980.0,
+                    "dac_precision_warning": true
+                },
+                "penalties": {
+                    "balance": 9.900000000000002,
+                    "line": {
+                        "line_0": 9.900000000000002,
+                        "line_1": 5.3466466504,
+                        "line_2": 9.900000000000002,
+                        "line_3": 9.900000000000002,
+                        "line_4": 9.900000000000002,
+                        "line_5": 4.62,
+                        "line_6": 4.950000000000001,
+                        "line_7": 4.62,
+                        "line_8": 4.62,
+                        "line_9": 4.62,
+                        "line_10": 4.950000000000001,
+                        "line_11": 4.950000000000001,
+                        "line_12": 4.950000000000001,
+                        "line_13": 4.950000000000001,
+                        "line_14": 4.950000000000001,
+                        "trafo_0": 4.950000000000001,
+                        "trafo_1": 4.950000000000001,
+                        "trafo_2": 4.62,
+                        "trafo_3": 4.62,
+                        "trafo_4": 4.950000000000001
+                    }
+                }
+            },
+            "qubo_parameters": {
+                "mw_precision": 10.0,
+                "penalty_balance": null,
+                "penalty_line": null,
+                "seed": 0
+            },
+            "algorithmic_metrics": {
+                "framework": "gate_based_qaoa",
+                "num_iterations": 1,
+                "qaoa": {}
+            },
+            "hardware_metrics": {
+                "qpu_target": "ideal_statevector",
+                "logical_qubits": 22,
+                "physical_qubits": 22,
+                "circuit_depth": 0,
+                "two_qubit_gates": 0,
+                "routing_overhead_multiplier": 1.0,
+                "resources": {}
+            }
+        }
+    }
+}

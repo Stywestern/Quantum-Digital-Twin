@@ -46,11 +46,11 @@
             }
         },
         "metadata": {
-            "status": "Failed: 32 qubits exceeds density matrix ceiling (15). Simulating 2^(2*32) state elements will cause an OOM error.",
+            "status": "Failed: 32 qubits exceeds density matrix ceiling (20). Simulating 2^(2*32) state elements will cause an OOM error.",
             "solver_name": "emu_qaoa_ibm_eagle_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.0042,
-                "formulation_cpu": 0.0036,
+                "total": 0.0034,
+                "formulation_cpu": 0.0031,
                 "parameter_optimisation": 0.0,
                 "sampling_and_decoding": 0.0
             },

@@ -46,11 +46,11 @@
             }
         },
         "metadata": {
-            "status": "Failed: 26 qubits exceeds max_qubits=24 (needs ~3.8 GB and a 2^26 energy table). Reduce the QUBO: coarser mw_precision, larger slack_precision_factor, fewer assets/lines, or raise max_qubits knowingly.",
+            "status": "Failed: 26 qubits exceeds max_qubits=20 (needs ~3.8 GB and a 2^26 energy table). Reduce the QUBO: coarser mw_precision, larger slack_precision_factor, fewer assets/lines, or raise max_qubits knowingly.",
             "solver_name": "ideal_qaoa_dc_ptdf",
             "execution_time_seconds": {
-                "total": 0.003,
-                "formulation_cpu": 0.0025,
+                "total": 0.0038,
+                "formulation_cpu": 0.0033,
                 "parameter_optimisation": 0.0,
                 "sampling_and_decoding": 0.0
             },

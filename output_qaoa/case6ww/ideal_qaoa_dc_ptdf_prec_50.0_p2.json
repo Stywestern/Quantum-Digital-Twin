@@ -91,10 +91,10 @@
             "status": "Success",
             "solver_name": "ideal_qaoa_dc_ptdf",
             "execution_time_seconds": {
-                "total": 56.7706,
-                "formulation_cpu": 0.0046,
-                "parameter_optimisation": 56.6052,
-                "sampling_and_decoding": 0.145
+                "total": 24.9197,
+                "formulation_cpu": 0.0031,
+                "parameter_optimisation": 24.7406,
+                "sampling_and_decoding": 0.124
             },
             "problem_complexity": {
                 "formulation": "dc_ptdf",
@@ -157,35 +157,35 @@
                     "per_depth": [
                         {
                             "p": 1,
-                            "approx_ratio": 0.9211213541103621,
-                            "p_ground": 0.00019075663816420582,
-                            "n_evals": 413,
+                            "approx_ratio": 0.9211212723442633,
+                            "p_ground": 0.00019061469431070293,
+                            "n_evals": 111,
                             "converged": true
                         },
                         {
                             "p": 2,
-                            "approx_ratio": 0.9492796862009091,
-                            "p_ground": 0.0007553782931781119,
-                            "n_evals": 1770,
-                            "converged": true
+                            "approx_ratio": 0.9492677032419268,
+                            "p_ground": 0.0007380184566329837,
+                            "n_evals": 1000,
+                            "converged": false
                         }
                     ],
                     "trained_optimal_angles": [
-                        0.8644681437000414,
-                        2.613517957921688,
-                        -0.37783986041006706,
-                        -0.18755059146776962
+                        0.8528191659878513,
+                        2.5634187931099395,
+                        -0.3799424759554214,
+                        -0.18848851132605163
                     ],
                     "trained_depth": 2,
-                    "approx_ratio": 0.9492796862009091,
+                    "approx_ratio": 0.9492677032419268,
                     "approx_ratio_random_baseline": 0.821259622057609,
-                    "p_ground_exact": 0.0007553782931781119,
-                    "p_ground_sampled": 0.001,
-                    "feasible_fraction": 0.739,
+                    "p_ground_exact": 0.0007380184566329837,
+                    "p_ground_sampled": 0.002,
+                    "feasible_fraction": 0.731,
                     "feasible_found": true,
                     "energy_scale": 6708.777785501369,
-                    "total_circuit_evals": 2183,
-                    "optimizer": "Powell",
+                    "total_circuit_evals": 1111,
+                    "optimizer": "COBYLA",
                     "backend": "numpy_statevector"
                 }
             },
